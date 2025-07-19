@@ -58,17 +58,28 @@ ENDPOINT_NAMES = {
 def load_model():
     """Load the compressed toxicity prediction model"""
     try:
-        model_path = 'models/african_phytochemical_toxicity_models.pkl.gz'
-        if os.path.exists(model_path):
-            with gzip.open(model_path, 'rb') as f:
-                model = pickle.load(f)
-            return model
-        else:
-            st.warning("Model file not found. Running in demo mode.")
-            return None
+        # Try multiple possible locations for the model file
+        possible_paths = [
+            'african_phytochemical_toxicity_models.pkl.gz',  # Same directory
+            'models/african_phytochemical_toxicity_models.pkl.gz',  # Models subdirectory
+            'african_phytochemical_toxicity_models.pkl',  # Uncompressed version
+        ]
+        
+        for model_path in possible_paths:
+            if os.path.exists(model_path):
+                if model_path.endswith('.gz'):
+                    with gzip.open(model_path, 'rb') as f:
+                        model = pickle.load(f)
+                else:
+                    with open(model_path, 'rb') as f:
+                        model = pickle.load(f)
+                return model
+        
+        st.warning("Model file not found. Running in demo mode.")
+        return None
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
-        return None
+        return None  
 
 class MockToxicityPredictor:
     """Mock predictor for when models are not available"""
@@ -120,18 +131,33 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
         self.is_loaded = False
         self.models = {}
     
-    def load_models_for_streamlit(self, model_path="models/african_phytochemical_toxicity_models.pkl.gz"):
+    def load_models_for_streamlit(self, model_path=None):
         """Load pre-trained models with Streamlit error handling"""
         try:
-            if not os.path.exists(model_path):
-                st.warning(f"Model file not found: {model_path}. Running in demo mode.")
-                return False
+            # Try multiple possible locations for the model file
+            possible_paths = [
+                'african_phytochemical_toxicity_models.pkl.gz',  # Same directory
+                'models/african_phytochemical_toxicity_models.pkl.gz',  # Models subdirectory
+                'african_phytochemical_toxicity_models.pkl',  # Uncompressed version
+            ]
             
-            with gzip.open(model_path, 'rb') as f:
-                self.models = pickle.load(f)
+            if model_path:
+                possible_paths.insert(0, model_path)
             
-            self.is_loaded = True
-            return True
+            for path in possible_paths:
+                if os.path.exists(path):
+                    if path.endswith('.gz'):
+                        with gzip.open(path, 'rb') as f:
+                            self.models = pickle.load(f)
+                    else:
+                        with open(path, 'rb') as f:
+                            self.models = pickle.load(f)
+                    
+                    self.is_loaded = True
+                    return True
+            
+            st.warning("Model file not found. Running in demo mode.")
+            return False
             
         except Exception as e:
             st.warning(f"Error loading models: {str(e)}. Running in demo mode.")
