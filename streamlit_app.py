@@ -76,7 +76,7 @@ if model is not None:
         def __init__(self):
             super().__init__()
             self.is_loaded = False
-        
+        '''
         def load_models_for_streamlit(self, model_path="models/african_phytochemical_toxicity_models.pkl"):
             """Load pre-trained models with Streamlit error handling"""
             try:
@@ -93,7 +93,7 @@ if model is not None:
             except Exception as e:
                 st.error(f"❌ Error loading models: {str(e)}")
                 return False
-        
+        '''
         def predict_batch_for_streamlit(self, smiles_list):
             """Predict toxicity for multiple compounds with progress tracking"""
             if not self.is_loaded:
