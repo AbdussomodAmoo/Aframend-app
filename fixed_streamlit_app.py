@@ -166,6 +166,35 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
         st.write(f"📂 Current directory: {os.getcwd()}")
         st.write(f"📋 Files in models/: {os.listdir('models/') if os.path.exists('models/') else 'models/ directory not found'}")
  
+        with gzip.open(model_path, 'rb') as f:
+            try:
+                loaded_data = pickle.load(f)
+                st.write(f"✅ Successfully unpickled data")
+                st.write(f"🔍 Data type: {type(loaded_data)}")
+                
+                # Check what we actually got
+                if hasattr(loaded_data, '__dict__'):
+                    st.write(f"📋 Object attributes: {list(loaded_data.__dict__.keys())}")
+                elif isinstance(loaded_data, dict):
+                    st.write(f"🔑 Dictionary keys: {list(loaded_data.keys())}")
+                
+                self.models = loaded_data  # or however you want to store it
+                self.is_loaded = True
+                return True
+                
+            except Exception as pickle_error:
+                st.error(f"💥 Error during unpickling: {str(pickle_error)}")
+                st.write(f"🔧 Error type: {type(pickle_error).__name__}")
+                
+                # Try to see if it's a compression issue
+                f.seek(0)  # Reset file pointer
+                raw_data = f.read()
+                st.write(f"📊 Raw file size: {len(raw_data)} bytes")
+                st.write(f"🔍 First 50 bytes: {raw_data[:50]}")
+                
+                return False
+        
+        '''
         try:
             # Try multiple possible locations for the model file
             possible_paths = [
@@ -201,14 +230,14 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
                             self.models = pickle.load(f)
                     
                     self.is_loaded = True
-                    return True
+                    return True 
             
             st.warning("Model file not found. Running in demo mode.")
             return False
             
         except Exception as e:
             st.warning(f"Error loading models: {str(e)}. Running in demo mode.")
-            return False
+            return False '''
     
     def calculate_molecular_descriptors(self, smiles):
         """Calculate molecular descriptors from SMILES"""
