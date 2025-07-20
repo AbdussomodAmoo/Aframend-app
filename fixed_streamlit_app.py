@@ -133,6 +133,11 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
     
     def load_models_for_streamlit(self, model_path=None):
         """Load pre-trained models with Streamlit error handling"""
+        st.write(f"🔍 Looking for model file: {model_path}")
+        st.write(f"📁 File exists: {os.path.exists(model_path)}")
+        st.write(f"📂 Current directory: {os.getcwd()}")
+        st.write(f"📋 Files in models/: {os.listdir('models/') if os.path.exists('models/') else 'models/ directory not found'}")
+ 
         try:
             # Try multiple possible locations for the model file
             possible_paths = [
@@ -149,6 +154,20 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
                     if path.endswith('.gz'):
                         with gzip.open(path, 'rb') as f:
                             self.models = pickle.load(f)
+                        # Add debug info about loaded models
+                        st.write(f"✅ Loaded model data type: {type(self.models)}")
+                        if isinstance(self.models, dict):
+                            st.write(f"🔑 Available keys: {list(self.models.keys())}")
+                            st.write(f"📊 Number of models: {len(self.models)}")
+                        elif hasattr(loaded_data, 'predict_single_compound'):
+                            st.write("✅ Found predict_single_compound method")
+                            self.predictor = loaded_data  # Store the actual predictor
+                            self.is_loaded = True
+                            return True
+                        else:
+                            st.warning(f"🤔 Unexpected data structure: {type(loaded_data)}")
+                            return False
+
                     else:
                         with open(path, 'rb') as f:
                             self.models = pickle.load(f)
