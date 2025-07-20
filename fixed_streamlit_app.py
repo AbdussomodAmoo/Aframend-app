@@ -69,10 +69,38 @@ def load_model():
             if os.path.exists(model_path):
                 if model_path.endswith('.gz'):
                     with gzip.open(model_path, 'rb') as f:
-                        model = pickle.load(f)
+                        try:                                            
+                            loaded_data = pickle.load(f)
+                            st.write(f"✅ Successfully unpickled data")
+                            st.write(f"🔍 Data type: {type(loaded_data)}")
+                            
+                            # Check what we actually got
+                            if hasattr(loaded_data, '__dict__'):
+                                st.write(f"📋 Object attributes: {list(loaded_data.__dict__.keys())}")
+                            elif isinstance(loaded_data, dict):
+                                st.write(f"🔑 Dictionary keys: {list(loaded_data.keys())}")
+                            
+                            self.models = loaded_data  # or however you want to store it
+                            self.is_loaded = True
+                            return True
+                            
+                        except Exception as pickle_error:
+                            st.error(f"💥 Error during unpickling: {str(pickle_error)}")
+                            st.write(f"🔧 Error type: {type(pickle_error).__name__}")
+                            
+                            # Try to see if it's a compression issue
+                            f.seek(0)  # Reset file pointer
+                            raw_data = f.read()
+                            st.write(f"📊 Raw file size: {len(raw_data)} bytes")
+                            st.write(f"🔍 First 50 bytes: {raw_data[:50]}")
+                            
+                            return False
+                        
+                        '''model = pickle.load(f)
+                
                 else:
                     with open(model_path, 'rb') as f:
-                        model = pickle.load(f)
+                        model = pickle.load(f)'''
                 return model
         
         st.warning("Model file not found. Running in demo mode.")
