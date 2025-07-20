@@ -131,7 +131,7 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
         self.is_loaded = False
         self.models = {}
     
-    def load_models_for_streamlit(self, model_path=None):
+    def load_models_for_streamlit(self, model_path= 'african_phytochemical_toxicity_models.pkl.gz'):
         """Load pre-trained models with Streamlit error handling"""
         st.write(f"🔍 Looking for model file: {model_path}")
         st.write(f"📁 File exists: {os.path.exists(model_path)}")
