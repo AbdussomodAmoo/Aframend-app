@@ -25,6 +25,9 @@ except ImportError:
 import warnings
 import pickle
 import gzip
+from model_loader_script import ModelLoader
+
+
 warnings.filterwarnings('ignore')
 
 # Page configuration - moved to top
@@ -61,27 +64,16 @@ ENDPOINT_NAMES = {
 
 @st.cache_data
 def load_models_dict():
-    """Load individual toxicity prediction models"""
-    models = {}
-    model_dir = 'models'
-    
-    if not os.path.exists(model_dir):
-        st.warning(f"Models directory '{model_dir}' not found.")
-        return None
-    
+    """Load individual toxicity prediction models using ModelLoader"""
     try:
-        loaded_count = 0
-        for endpoint in TOX21_ENDPOINTS:
-            model_path = os.path.join(model_dir, f"{endpoint}_model.pkl")
-            if os.path.exists(model_path):
-                with open(model_path, 'rb') as f:
-                    models[endpoint] = pickle.load(f)
-                st.write(f"✅ Loaded {endpoint} model")
-            else:
-                st.warning(f"⚠️ Model file not found: {model_path}")
+        loader = ModelLoader("models")
+        models = loader.load_all_models()
         
         if models:
             st.success(f"Successfully loaded {len(models)} models")
+            # Show which models were loaded
+            for model_name in models.keys():
+                st.write(f"✅ Loaded {model_name} model")
             return models
         else:
             st.warning("No models could be loaded.")
@@ -90,8 +82,7 @@ def load_models_dict():
     except Exception as e:
         st.error(f"Error loading models: {str(e)}")
         return None
-
-
+        
 
 class MockToxicityPredictor:
     """Mock predictor for when models are not available"""
@@ -152,13 +143,20 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
         self.models = {}
 
     def load_models_for_streamlit(self):
-        """Load pre-trained models with Streamlit error handling"""
-        loaded_models = load_models_dict()
-        if loaded_models:
-            self.models = loaded_models
-            self.is_loaded = True
-            return True
-        else:
+        """Load pre-trained models with Streamlit error handling using ModelLoader"""
+        try:
+            loader = ModelLoader("models")
+            loaded_models = loader.load_all_models()
+            
+            if loaded_models:
+                self.models = loaded_models
+                self.is_loaded = True
+                return True
+            else:
+                self.is_loaded = False
+                return False
+        except Exception as e:
+            st.error(f"Error in model loading: {str(e)}")
             self.is_loaded = False
             return False
    
