@@ -33,7 +33,8 @@ class ModelLoader:
             return {}
         
         print(f"Found {len(model_files)} model files:")
-        
+
+        loaded_count = 0
         for model_path in model_files:
             model_name = Path(model_path).stem  # Get filename without extension
             try:
@@ -41,10 +42,17 @@ class ModelLoader:
                     model = pickle.load(f)
                 self.loaded_models[model_name] = model
                 print(f"✓ Loaded: {model_name}")
+                st.write(f"✅ Successfully loaded: {model_name}")
+                loaded_count += 1
             except Exception as e:
                 print(f"✗ Failed to load {model_name}: {str(e)}")
+                st.error(error_msg)
+                # Continue loading other models even if one fails
+                continue
+                
+        st.write(f"📊 Successfully loaded {loaded_count}/{len(model_files)} models")
         
-        return self.loaded_models
+        return self.loaded_models.copy() # return a copy to avoid reference issues
     
     def load_specific_model(self, model_name):
         """
@@ -71,9 +79,12 @@ class ModelLoader:
                 model = pickle.load(f)
             self.loaded_models[model_name] = model
             print(f"✓ Loaded: {model_name}")
+            st.success(f"✅ Loaded: {model_name}")
             return model
         except Exception as e:
-            print(f"✗ Failed to load {model_name}: {str(e)}")
+            error_msg = f"✗ Failed to load {model_name}: {str(e)}"
+            print(error_msg)
+            st.error(error_msg)
             return None
     
     def get_model(self, model_name):
@@ -94,10 +105,13 @@ class ModelLoader:
         """
         if not self.loaded_models:
             print("No models currently loaded.")
+            st.warning("No models currently loaded.")
         else:
             print("Loaded models:")
+            st.write("📋 Currently loaded models:")
             for model_name in self.loaded_models.keys():
                 print(f"  - {model_name}")
+                st.write(f"  • {model_name}")
     
     def get_available_models(self):
         """
@@ -109,29 +123,70 @@ class ModelLoader:
         if not self.models_dir.exists():
             return []
         
+        available = [Path(f).stem for f in model_files]
+        
+        # Debug output
+        st.write(f"🔍 Available model files: {available}")
+        
+        return available
+    def verify_models_exist(self):
+        """
+        Verify that model files exist and can be opened.
+        
+        Returns:
+            dict: Status of each model file
+        """
+        model_status = {}
         model_files = glob.glob(str(self.models_dir / "*.pkl"))
-        return [Path(f).stem for f in model_files]
-
-# Example usage
-if __name__ == "__main__":
+        
+        for model_path in model_files:
+            model_name = Path(model_path).stem
+            try:
+                # Try to open the file and check if it's a valid pickle
+                with open(model_path, 'rb') as f:
+                    # Just peek at the file, don't load the full model
+                    pickle.load(f)
+                model_status[model_name] = "✅ Valid"
+            except Exception as e:
+                model_status[model_name] = f"❌ Error: {str(e)}"
+        
+        return model_status
+        
+# Example usage and testing function
+def test_model_loader():
+    """Test function to verify model loading works"""
+    st.write("🧪 **Testing Model Loader**")
+    
     # Initialize the model loader
-    loader = ModelLoader("models")  # Change path if needed
+    loader = ModelLoader("models")
+    
+    # Check available models
+    available = loader.get_available_models()
+    st.write(f"Available models: {available}")
+    
+    # Verify model files
+    status = loader.verify_models_exist()
+    st.write("Model file verification:")
+    for name, stat in status.items():
+        st.write(f"  {name}: {stat}")
     
     # Load all models
     models = loader.load_all_models()
     
-    # List loaded models
-    loader.list_loaded_models()
+    if models:
+        st.success(f"🎉 Successfully loaded {len(models)} models!")
+        st.write("Loaded model names:", list(models.keys()))
+        
+        # Test a specific model if available
+        if models:
+            first_model_name = list(models.keys())[0]
+            first_model = models[first_model_name]
+            st.write(f"Sample model '{first_model_name}' type: {type(first_model)}")
+    else:
+        st.error("❌ No models were loaded successfully")
     
-    # Access a specific model (replace with your actual model name)
-    # nr_ahr_model = loader.get_model("NR-AhR_model")
-    # if nr_ahr_model:
-    #     print(f"NR-AhR model loaded successfully!")
-    #     # Use the model for predictions, etc.
-    
-    # Load a specific model if needed
-    # specific_model = loader.load_specific_model("SR-ARE_model")
-    
-    # Get list of available models
-    available_models = loader.get_available_models()
-    print(f"\nAvailable models: {available_models}")
+    return models
+
+if __name__ == "__main__":
+    # Run the test
+    test_model_loader()
