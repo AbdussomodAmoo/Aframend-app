@@ -66,6 +66,7 @@ def load_models_dict():
         return None
     
     try:
+        loaded_count = 0
         for endpoint in TOX21_ENDPOINTS:
             model_path = os.path.join(model_dir, f"{endpoint}_model.pkl")
             if os.path.exists(model_path):
@@ -147,7 +148,18 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
         super().__init__()
         self.is_loaded = False
         self.models = {}
-    
+
+    def load_models_for_streamlit(self):
+        """Load pre-trained models with Streamlit error handling"""
+        loaded_models = load_models_dict()
+        if loaded_models:
+            self.models = loaded_models
+            self.is_loaded = True
+            return True
+        else:
+            self.is_loaded = False
+            return False
+    '''
     def load_models_for_streamlit(self, model_path= 'african_phytochemical_toxicity_models.pkl.gz'):
         """Load pre-trained models with Streamlit error handling"""
         st.write(f"🔍 Looking for model file: {model_path}")
@@ -181,7 +193,7 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
                 st.write(f"📊 Raw file size: {len(raw_data)} bytes")
                 st.write(f"🔍 First 50 bytes: {raw_data[:50]}")
                 
-                return False
+                return False'''
         
         '''
         try:
