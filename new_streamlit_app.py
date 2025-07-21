@@ -97,11 +97,40 @@ def debug_model_loading():
         st.write(f"📋 Traceback: {traceback.format_exc()}")
         return None
 
-# @st.cache_data  # Comment out the cache decorator temporarily
 def load_models_dict():
     """Load individual toxicity prediction models using ModelLoader"""
     st.write("🔄 Loading models...")
-    return debug_model_loading()
+    
+    try:
+        from model_loader_script import ModelLoader
+        loader = ModelLoader("models")
+        
+        # Get available models first
+        available_models = loader.get_available_models()
+        st.write(f"📂 Found {len(available_models)} model files: {available_models}")
+        
+        if not available_models:
+            st.error("❌ No model files found in 'models' directory")
+            return None
+        
+        # Load all models
+        loaded_models = loader.load_all_models()
+        
+        if loaded_models:
+            st.success(f"✅ Successfully loaded {len(loaded_models)} models")
+            return loaded_models
+        else:
+            st.error("❌ Failed to load any models")
+            return None
+            
+    except ImportError as e:
+        st.error(f"❌ Import error: {e}")
+        return None
+    except Exception as e:
+        st.error(f"❌ Unexpected error in model loading: {e}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
+        return None
 
 
 
@@ -166,18 +195,69 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
     def load_models_for_streamlit(self):
         """Load pre-trained models with Streamlit error handling using ModelLoader"""
         try:
+            st.info("🔄 Initializing model loader...")
+            
+            from model_loader_script import ModelLoader
             loader = ModelLoader("models")
+            
+            # Check if models directory exists
+            if not loader.models_dir.exists():
+                st.error(f"❌ Models directory '{loader.models_dir}' does not exist!")
+                return False
+            
+            st.info("📂 Models directory found, checking for model files...")
+            
+            # Get available models
+            available_models = loader.get_available_models()
+            if not available_models:
+                st.error("❌ No .pkl model files found in models directory")
+                return False
+            st.info(f"📊 Found {len(available_models)} model files: {available_models}")
+            
+            # Verify models before loading
+            st.info("🔍 Verifying model files...")
+            verification_status = loader.verify_models_exist()
+            
+            valid_models = 0
+            for name, status in verification_status.items():
+                if "Valid" in status:
+                    valid_models += 1
+                else:
+                    st.warning(f"⚠️ Model {name}: {status}")
+            
+            if valid_models == 0:
+                st.error("❌ No valid model files found")
+                return False
+            
+            st.info(f"✅ {valid_models} valid models found, loading...")
+            
+            # Load models
             loaded_models = loader.load_all_models()
             
-            if loaded_models:
+            if loaded_models and len(loaded_models) > 0:
                 self.models = loaded_models
                 self.is_loaded = True
+                st.success(f"🎉 Successfully loaded {len(loaded_models)} models!")
+                
+                # Display loaded model names
+                model_names = list(loaded_models.keys())
+                st.info(f"📋 Loaded models: {model_names}")
+                
                 return True
             else:
+                st.error("❌ Model loading returned empty dictionary")
                 self.is_loaded = False
                 return False
+                
+        except ImportError as e:
+            st.error(f"❌ Import error: {e}")
+            st.info("Make sure 'model_loader_script.py' is in the same directory as this app")
+            self.is_loaded = False
+            return False
         except Exception as e:
-            st.error(f"Error in model loading: {str(e)}")
+            st.error(f"❌ Error in model loading: {str(e)}")
+            import traceback
+            st.error(f"Traceback: {traceback.format_exc()}")
             self.is_loaded = False
             return False
    
@@ -292,10 +372,17 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
 # Initialize predictor
 @st.cache_resource
 def load_predictor():
+    """Load predictor with better error handling"""
     predictor = StreamlitToxicityPredictor()
+    
+    st.write("🚀 Initializing toxicity predictor...")
     success = predictor.load_models_for_streamlit()
-    if not success:
-        st.info("Falling back to demo mode")
+    
+    if success:
+        st.success("✅ Predictor loaded successfully!")
+    else:
+        st.warning("⚠️ Falling back to demo mode")
+    
     return predictor
 
 def create_download_link(df, filename):
