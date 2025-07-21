@@ -4,6 +4,9 @@ African Phytochemical Toxicity Prediction App
 A Streamlit application for researchers to analyze compound toxicity
 """
 
+from collections import Counter
+import requests
+import zipfile
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -22,6 +25,17 @@ except ImportError:
 import warnings
 import pickle
 import gzip
+from model_loader_script import ModelLoader
+
+# Add this right after your imports, before the constants
+try:
+    from model_loader_script import ModelLoader  # Adjust filename as needed
+    TEST_LOADER = ModelLoader("models")
+    LOADER_AVAILABLE = True
+    st.sidebar.success("✅ ModelLoader Import OK")
+except ImportError as e:
+    LOADER_AVAILABLE = False
+    st.sidebar.error(f"❌ ModelLoader Import Failed: {e}")
 warnings.filterwarnings('ignore')
 
 # Page configuration - moved to top
@@ -54,47 +68,42 @@ ENDPOINT_NAMES = {
     'SR-p53': 'p53 Tumor Suppressor'
 }
 
-def extract_molecular_features(smiles):
-    """Extract molecular features from SMILES"""
-    if not RDKIT_AVAILABLE:
-        # Return mock features if RDKit is not available
-        return [
-            180.0,  # MolWt
-            2.5,    # LogP
-            50.0,   # TPSA
-            2,      # NumHDonors
-            3,      # NumHAcceptors
-            5,      # NumRotatableBonds
-            12,     # HeavyAtomCount
-            1,      # NumAromaticRings
-            0.3,    # FractionCsp3
-            15.0,   # BertzCT
-            0,      # NumSaturatedRings
-            0       # NumAliphaticRings
-        ]
+def debug_model_loading():
+    """Debug function to test model loading without cache"""
+    st.write("🔍 **DEBUG: Testing Model Loading**")
     
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return [0] * 12  # Return zeros for invalid SMILES
-
     try:
-        features = [
-            Descriptors.MolWt(mol),                    # Molecular weight
-            Descriptors.MolLogP(mol),                  # Lipophilicity
-            Descriptors.TPSA(mol),                     # Topological polar surface area
-            Descriptors.NumHDonors(mol),               # Hydrogen bond donors
-            Descriptors.NumHAcceptors(mol),            # Hydrogen bond acceptors
-            Descriptors.NumRotatableBonds(mol),        # Rotatable bonds
-            Descriptors.HeavyAtomCount(mol),           # Heavy atom count
-            Descriptors.NumAromaticRings(mol),         # Aromatic rings
-            Descriptors.FractionCsp3(mol),             # Fraction sp3 carbons
-            Descriptors.BertzCT(mol),                  # Molecular complexity
-            Descriptors.NumSaturatedRings(mol),        # Saturated rings
-            Descriptors.NumAliphaticRings(mol)         # Aliphatic rings
-        ]
-        return features
-    except:
-        return [0] * 12
+        from model_loader_script import ModelLoader  # Make sure this import works
+        st.write("✅ ModelLoader imported successfully")
+        
+        loader = ModelLoader("models")
+        st.write("✅ ModelLoader initialized")
+        
+        available = loader.get_available_models()
+        st.write(f"📂 Available models: {available}")
+        
+        if available:
+            st.write("🔄 Attempting to load models...")
+            models = loader.load_all_models()
+            st.write(f"✅ Loaded models: {list(models.keys()) if models else 'None'}")
+            return models
+        else:
+            st.write("❌ No models found")
+            return None
+            
+    except Exception as e:
+        st.write(f"❌ Error: {str(e)}")
+        import traceback
+        st.write(f"📋 Traceback: {traceback.format_exc()}")
+        return None
+
+# @st.cache_data  # Comment out the cache decorator temporarily
+def load_models_dict():
+    """Load individual toxicity prediction models using ModelLoader"""
+    st.write("🔄 Loading models...")
+    return debug_model_loading()
+
+
 
 class MockToxicityPredictor:
     """Mock predictor for when models are not available"""
@@ -102,13 +111,19 @@ class MockToxicityPredictor:
     def __init__(self):
         self.is_loaded = False
         self.models = {}
-        self.feature_names = []
-        self.endpoint_names = ENDPOINT_NAMES
     
     def load_models_for_streamlit(self):
         """Mock model loading"""
-        self.is_loaded = False
-        return False
+        '''self.is_loaded = False
+        return False'''
+        loaded_models = load_models_dict()
+        if loaded_models:
+            self.models = loaded_models
+            self.is_loaded = True
+            return True
+        else:
+            self.is_loaded = False
+            return False
     
     def predict_single_compound(self, smiles):
         """Mock single compound prediction"""
@@ -147,150 +162,140 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
         super().__init__()
         self.is_loaded = False
         self.models = {}
-        self.feature_names = []
-        self.endpoint_names = ENDPOINT_NAMES
-    
-    def load_models_for_streamlit(self, model_path='african_phytochemical_toxicity_models.pkl.gz'):
-        """Load pre-trained models with Streamlit error handling"""
+
+    def load_models_for_streamlit(self):
+        """Load pre-trained models with Streamlit error handling using ModelLoader"""
         try:
-            # Try multiple possible locations for the model file
-            possible_paths = [
-                model_path,
-                'african_phytochemical_toxicity_models.pkl.gz',
-                'models/african_phytochemical_toxicity_models.pkl.gz',
-                'african_phytochemical_toxicity_models.pkl',
-            ]
+            loader = ModelLoader("models")
+            loaded_models = loader.load_all_models()
             
-            loaded_data = None
-            successful_path = None
-            
-            for path in possible_paths:
-                if os.path.exists(path):
-                    st.write(f"🔍 Found model file: {path}")
-                    try:
-                        if path.endswith('.gz'):
-                            with gzip.open(path, 'rb') as f:
-                                loaded_data = pickle.load(f)
-                        else:
-                            with open(path, 'rb') as f:
-                                loaded_data = pickle.load(f)
-                        successful_path = path
-                        break
-                    except Exception as e:
-                        st.write(f"❌ Failed to load {path}: {e}")
-                        continue
-            
-            if loaded_data is None:
-                st.warning("Model file not found. Running in demo mode.")
-                return False
-            
-            st.write(f"✅ Successfully loaded model from: {successful_path}")
-            st.write(f"🔍 Data type: {type(loaded_data)}")
-            
-            # Check the structure of loaded data
-            if isinstance(loaded_data, dict):
-                st.write(f"🔑 Dictionary keys: {list(loaded_data.keys())}")
-                
-                # Extract models from the correct structure
-                if 'models' in loaded_data:
-                    self.models = loaded_data['models']
-                    st.write(f"📊 Found {len(self.models)} models")
-                    st.write(f"🎯 Available endpoints: {list(self.models.keys())}")
-                    
-                    # Extract other information
-                    if 'feature_names' in loaded_data:
-                        self.feature_names = loaded_data['feature_names']
-                        st.write(f"🧬 Feature names: {self.feature_names}")
-                    
-                    if 'endpoint_names' in loaded_data:
-                        self.endpoint_names = loaded_data['endpoint_names']
-                    
-                    self.is_loaded = True
-                    return True
-                else:
-                    st.error("❌ Invalid model file structure. Expected 'models' key not found.")
-                    return False
+            if loaded_models:
+                self.models = loaded_models
+                self.is_loaded = True
+                return True
             else:
-                st.error(f"❌ Unexpected data structure: {type(loaded_data)}")
+                self.is_loaded = False
                 return False
-                
         except Exception as e:
-            st.error(f"💥 Error loading models: {str(e)}")
+            st.error(f"Error in model loading: {str(e)}")
+            self.is_loaded = False
             return False
-    
-    def predict_single_compound(self, smiles):
-        """Predict toxicity for a single compound"""
-        if not self.is_loaded:
-            return super().predict_single_compound(smiles)
+   
+        
+    def calculate_molecular_descriptors(self, smiles):
+        """Calculate molecular descriptors from SMILES"""
+        if not RDKIT_AVAILABLE:
+            # Return mock descriptors if RDKit is not available
+            return {
+                'MolWt': 180.0,
+                'LogP': 2.5,
+                'TPSA': 50.0,
+                'NumHDonors': 2,
+                'NumHAcceptors': 3,
+                'NumRotatableBonds': 5,
+                'NumAromaticRings': 1,
+                'NumSaturatedRings': 0,
+                'NumAliphaticRings': 0,
+                'RingCount': 1,
+                'FractionCsp3': 0.3,
+                'HeavyAtomCount': 12
+            }
         
         try:
-            # Extract features
-            features = extract_molecular_features(smiles)
-            features_array = np.array(features).reshape(1, -1)
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                return None
             
-            results = {'smiles': smiles, 'predictions': {}}
-            high_risk_count = 0
+            descriptors = {
+                'MolWt': Descriptors.MolWt(mol),
+                'LogP': Descriptors.MolLogP(mol),
+                'TPSA': Descriptors.TPSA(mol),
+                'NumHDonors': Descriptors.NumHDonors(mol),
+                'NumHAcceptors': Descriptors.NumHAcceptors(mol),
+                'NumRotatableBonds': Descriptors.NumRotatableBonds(mol),
+                'NumAromaticRings': Descriptors.NumAromaticRings(mol),
+                'NumSaturatedRings': Descriptors.NumSaturatedRings(mol),
+                'NumAliphaticRings': Descriptors.NumAliphaticRings(mol),
+                'RingCount': Descriptors.RingCount(mol),
+                'FractionCsp3': Descriptors.FractionCsp3(mol),
+                'HeavyAtomCount': Descriptors.HeavyAtomCount(mol)
+            }
             
-            for endpoint in self.models:
+            return descriptors
+            
+        except Exception as e:
+            st.error(f"Error calculating descriptors: {e}")
+            return None
+    #New Addition
+    def predict_single_compound(self, smiles):
+        """Predict toxicity for a single compound using loaded models"""
+        if not self.is_loaded:
+            return super().predict_single_compound(smiles)  # Use mock prediction
+        
+        # Calculate descriptors
+        descriptors = self.calculate_molecular_descriptors(smiles)
+        if not descriptors:
+            return None
+        
+        # Convert to DataFrame for model input
+        descriptor_df = pd.DataFrame([descriptors])
+        
+        # Make predictions for each endpoint
+        predictions = {}
+        toxic_count = 0
+        
+        for endpoint in TOX21_ENDPOINTS:
+            if endpoint in self.models:
+                model = self.models[endpoint]
+                
                 try:
-                    model = self.models[endpoint]
-                    pred_proba = model.predict_proba(features_array)[0]
+                    # Get prediction and probability
+                    pred_proba = model.predict_proba(descriptor_df)[0]
+                    toxic_prob = pred_proba[1] if len(pred_proba) > 1 else pred_proba[0]
+                    prediction = "Toxic" if toxic_prob > 0.5 else "Non-toxic"
                     
-                    # Handle different probability array structures
-                    if len(pred_proba) > 1:
-                        toxic_prob = pred_proba[1]  # Probability of toxic class
+                    # Determine risk level
+                    if toxic_prob > 0.7:
+                        risk_level = "High"
+                        toxic_count += 1
+                    elif toxic_prob > 0.3:
+                        risk_level = "Medium"
                     else:
-                        toxic_prob = pred_proba[0]
+                        risk_level = "Low"
                     
-                    risk_level = 'High' if toxic_prob > 0.7 else 'Medium' if toxic_prob > 0.3 else 'Low'
-                    if risk_level == 'High':
-                        high_risk_count += 1
-                    
-                    results['predictions'][endpoint] = {
-                        'endpoint_name': self.endpoint_names.get(endpoint, endpoint),
-                        'toxic_probability': round(float(toxic_prob), 3),
-                        'prediction': 'Toxic' if toxic_prob > 0.5 else 'Non-toxic',
+                    predictions[endpoint] = {
+                        'endpoint_name': ENDPOINT_NAMES.get(endpoint, endpoint),
+                        'prediction': prediction,
+                        'toxic_probability': float(toxic_prob),
                         'risk_level': risk_level
                     }
                     
                 except Exception as e:
-                    st.warning(f"Error predicting for endpoint {endpoint}: {e}")
+                    st.warning(f"Error predicting for {endpoint}: {str(e)}")
                     continue
-            
-            # Overall risk assessment
-            results['overall_risk'] = 'High' if high_risk_count >= 2 else 'Medium' if high_risk_count >= 1 else 'Low'
-            
-            return results
-            
-        except Exception as e:
-            st.error(f"Error in prediction: {e}")
-            return None
+        
+        # Determine overall risk
+        if toxic_count >= 4:
+            overall_risk = "High"
+        elif toxic_count >= 2:
+            overall_risk = "Medium"
+        else:
+            overall_risk = "Low"
+        
+        return {
+            'smiles': smiles,
+            'overall_risk': overall_risk,
+            'predictions': predictions
+        }
     
-    def predict_batch_for_streamlit(self, smiles_list):
-        """Predict toxicity for batch of compounds"""
-        results = []
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        max_compounds = min(len(smiles_list), 100)  # Limit for performance
-        
-        for i, smiles in enumerate(smiles_list[:max_compounds]):
-            status_text.text(f'Processing compound {i+1} of {max_compounds}...')
-            
-            result = self.predict_single_compound(smiles)
-            if result:
-                results.append(result)
-            
-            progress_bar.progress((i + 1) / max_compounds)
-        
-        status_text.text(f'Analysis complete! Processed {len(results)} compounds.')
-        return results
 
 # Initialize predictor
 @st.cache_resource
 def load_predictor():
     predictor = StreamlitToxicityPredictor()
-    predictor.load_models_for_streamlit()
+    success = predictor.load_models_for_streamlit()
+    if not success:
+        st.info("Falling back to demo mode")
     return predictor
 
 def create_download_link(df, filename):
@@ -407,17 +412,7 @@ def about_page():
     
     with tab2:
         st.header("🤖 Model Performance")
-        predictor = load_predictor()
-        if predictor.is_loaded:
-            st.success("✅ Models successfully loaded")
-            st.info(f"📊 {len(predictor.models)} toxicity models available")
-            
-            # Display available endpoints
-            st.subheader("Available Endpoints:")
-            for endpoint in predictor.models.keys():
-                st.write(f"- {predictor.endpoint_names.get(endpoint, endpoint)}")
-        else:
-            st.warning("⚠️ Models not loaded - running in demo mode")
+        st.info("Model performance statistics will be displayed when models are loaded.")
     
     with tab3:
         st.header("📖 References")
@@ -489,7 +484,7 @@ def toxicity_analysis_page():
     predictor = load_predictor()
     if not predictor.is_loaded:
         st.warning("⚠️ Models not loaded. Running in demo mode with mock predictions.")
-        st.info("To use real predictions, ensure the model file is available in the application directory.")
+        st.info("To use real predictions, ensure the model file is available in the 'models/' directory.")
     
     tab1, tab2 = st.tabs(["📁 Batch Analysis (CSV)", "🔬 Single Compound"])
     
@@ -609,6 +604,12 @@ def toxicity_analysis_page():
                     st.error("❌ Could not analyze the compound. Please check the SMILES string.")
 
 def main():
+
+    # DEBUG SECTION - Add this temporarily
+    if st.sidebar.button("🔍 Debug Model Loading"):
+        st.write("## Debug Information")
+        debug_model_loading()
+        st.write("---")
     """Main application function"""
     # Sidebar navigation
     st.sidebar.title("🧪 Navigation")
