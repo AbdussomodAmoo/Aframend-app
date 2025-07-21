@@ -130,7 +130,8 @@ def load_model():
                             
                             return False
                         
-                        '''model = pickle.load(f)
+                        '''
+                    model = pickle.load(f)
                 
                 else:
                     with open(model_path, 'rb') as f:
