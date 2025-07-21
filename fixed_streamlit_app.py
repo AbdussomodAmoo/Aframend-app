@@ -337,7 +337,8 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
 
 # Initialize predictor
 @st.cache_resource
-'''def load_predictor():
+'''
+def load_predictor():
     predictor = StreamlitToxicityPredictor()
     predictor.load_models_for_streamlit()
     return predictor'''
