@@ -58,43 +58,25 @@ ENDPOINT_NAMES = {
 }
 
 
+'''
 @st.cache_data
 def load_models_dict():
     """Load individual toxicity prediction models"""
     models = {}
-    
-    # First, try to load the main model file
-    main_model_path = 'african_phytochemical_toxicity_models.pkl'
-    if os.path.exists(main_model_path):
-        try:
-            import joblib
-            model_data = joblib.load(main_model_path)
-            models = model_data.get('models', {})
-            if models:
-                st.success(f"Successfully loaded {len(models)} models from main file")
-                return models
-        except Exception as e:
-            st.warning(f"Could not load main model file: {str(e)}")
-    
-    # Fallback: try individual model files
     model_dir = 'models'
+    
     if not os.path.exists(model_dir):
         st.warning(f"Models directory '{model_dir}' not found.")
         return None
     
     try:
+        loaded_count = 0
         for endpoint in TOX21_ENDPOINTS:
             model_path = os.path.join(model_dir, f"{endpoint}_model.pkl")
             if os.path.exists(model_path):
-                try:
-                    import joblib
-                    models[endpoint] = joblib.load(model_path)
-                    st.write(f"✅ Loaded {endpoint} model")
-                except:
-                    # Try with pickle if joblib fails
-                    with open(model_path, 'rb') as f:
-                        models[endpoint] = pickle.load(f)
-                    st.write(f"✅ Loaded {endpoint} model (pickle)")
+                with open(model_path, 'rb') as f:
+                    models[endpoint] = pickle.load(f)
+                st.write(f"✅ Loaded {endpoint} model")
             else:
                 st.warning(f"⚠️ Model file not found: {model_path}")
         
@@ -107,8 +89,8 @@ def load_models_dict():
             
     except Exception as e:
         st.error(f"Error loading models: {str(e)}")
-        return None
-    
+        return None'''
+
 
 
 class MockToxicityPredictor:
