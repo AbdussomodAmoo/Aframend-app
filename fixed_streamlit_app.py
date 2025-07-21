@@ -141,7 +141,7 @@ class MockToxicityPredictor:
         status_text.text('Demo analysis complete!')
         return results
 
-class StreamlitToxicityPredictor:
+class StreamlitToxicityPredictor(MockToxicityPredictor):
     """Streamlit wrapper for the toxicity predictor"""
     
     def __init__(self):
