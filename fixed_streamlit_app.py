@@ -54,6 +54,40 @@ ENDPOINT_NAMES = {
     'SR-p53': 'p53 Tumor Suppressor'
 }
 
+
+@st.cache_data
+def load_models_dict():
+    """Load individual toxicity prediction models"""
+    models = {}
+    model_dir = 'models'
+    
+    if not os.path.exists(model_dir):
+        st.warning(f"Models directory '{model_dir}' not found.")
+        return None
+    
+    try:
+        for endpoint in TOX21_ENDPOINTS:
+            model_path = os.path.join(model_dir, f"{endpoint}_model.pkl")
+            if os.path.exists(model_path):
+                with open(model_path, 'rb') as f:
+                    models[endpoint] = pickle.load(f)
+                st.write(f"✅ Loaded {endpoint} model")
+            else:
+                st.warning(f"⚠️ Model file not found: {model_path}")
+        
+        if models:
+            st.success(f"Successfully loaded {len(models)} models")
+            return models
+        else:
+            st.warning("No models could be loaded.")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error loading models: {str(e)}")
+        return None
+
+
+'''
 @st.cache_data
 def load_model():
     """Load the compressed toxicity prediction model"""
@@ -108,7 +142,7 @@ def load_model():
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
         return None  
-
+'''
 class MockToxicityPredictor:
     """Mock predictor for when models are not available"""
     
@@ -118,8 +152,16 @@ class MockToxicityPredictor:
     
     def load_models_for_streamlit(self):
         """Mock model loading"""
-        self.is_loaded = False
-        return False
+        '''self.is_loaded = False
+        return False'''
+        loaded_models = load_models_dict()
+        if loaded_models:
+            self.models = loaded_models
+            self.is_loaded = True
+            return True
+        else:
+            self.is_loaded = False
+            return False
     
     def predict_single_compound(self, smiles):
         """Mock single compound prediction"""
@@ -283,12 +325,80 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
         except Exception as e:
             st.error(f"Error calculating descriptors: {e}")
             return None
+    #New Addition
+    def predict_single_compound(self, smiles):
+        """Predict toxicity for a single compound using loaded models"""
+        if not self.is_loaded:
+            return super().predict_single_compound(smiles)  # Use mock prediction
+        
+        # Calculate descriptors
+        descriptors = self.calculate_molecular_descriptors(smiles)
+        if not descriptors:
+            return None
+        
+        # Convert to DataFrame for model input
+        descriptor_df = pd.DataFrame([descriptors])
+        
+        # Make predictions for each endpoint
+        predictions = {}
+        toxic_count = 0
+        
+        for endpoint in TOX21_ENDPOINTS:
+            if endpoint in self.models:
+                model = self.models[endpoint]
+                
+                try:
+                    # Get prediction and probability
+                    pred_proba = model.predict_proba(descriptor_df)[0]
+                    toxic_prob = pred_proba[1] if len(pred_proba) > 1 else pred_proba[0]
+                    prediction = "Toxic" if toxic_prob > 0.5 else "Non-toxic"
+                    
+                    # Determine risk level
+                    if toxic_prob > 0.7:
+                        risk_level = "High"
+                        toxic_count += 1
+                    elif toxic_prob > 0.3:
+                        risk_level = "Medium"
+                    else:
+                        risk_level = "Low"
+                    
+                    predictions[endpoint] = {
+                        'endpoint_name': ENDPOINT_NAMES.get(endpoint, endpoint),
+                        'prediction': prediction,
+                        'toxic_probability': float(toxic_prob),
+                        'risk_level': risk_level
+                    }
+                    
+                except Exception as e:
+                    st.warning(f"Error predicting for {endpoint}: {str(e)}")
+                    continue
+        
+        # Determine overall risk
+        if toxic_count >= 4:
+            overall_risk = "High"
+        elif toxic_count >= 2:
+            overall_risk = "Medium"
+        else:
+            overall_risk = "Low"
+        
+        return {
+            'smiles': smiles,
+            'overall_risk': overall_risk,
+            'predictions': predictions
+        }
+    
 
 # Initialize predictor
 @st.cache_resource
-def load_predictor():
+'''def load_predictor():
     predictor = StreamlitToxicityPredictor()
     predictor.load_models_for_streamlit()
+    return predictor'''
+def load_predictor():
+    predictor = StreamlitToxicityPredictor()
+    success = predictor.load_models_for_streamlit()
+    if not success:
+        st.info("Falling back to demo mode")
     return predictor
 
 def create_download_link(df, filename):
