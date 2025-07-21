@@ -58,7 +58,7 @@ ENDPOINT_NAMES = {
 }
 
 
-'''
+
 @st.cache_data
 def load_models_dict():
     """Load individual toxicity prediction models"""
@@ -89,7 +89,7 @@ def load_models_dict():
             
     except Exception as e:
         st.error(f"Error loading models: {str(e)}")
-        return None'''
+        return None
 
 
 
