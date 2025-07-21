@@ -57,38 +57,6 @@ ENDPOINT_NAMES = {
     'SR-p53': 'p53 Tumor Suppressor'
 }
 
-'''
-@st.cache_data
-def load_models_dict():
-    """Load individual toxicity prediction models"""
-    models = {}
-    model_dir = 'models'
-    
-    if not os.path.exists(model_dir):
-        st.warning(f"Models directory '{model_dir}' not found.")
-        return None
-    
-    try:
-        loaded_count = 0
-        for endpoint in TOX21_ENDPOINTS:
-            model_path = os.path.join(model_dir, f"{endpoint}_model.pkl")
-            if os.path.exists(model_path):
-                with open(model_path, 'rb') as f:
-                    models[endpoint] = pickle.load(f)
-                st.write(f"✅ Loaded {endpoint} model")
-            else:
-                st.warning(f"⚠️ Model file not found: {model_path}")
-        
-        if models:
-            st.success(f"Successfully loaded {len(models)} models")
-            return models
-        else:
-            st.warning("No models could be loaded.")
-            return None
-            
-    except Exception as e:
-        st.error(f"Error loading models: {str(e)}")
-        return None'''
 
 @st.cache_data
 def load_models_dict():
