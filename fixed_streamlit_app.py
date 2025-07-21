@@ -195,51 +195,6 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
                 
                 return False'''
         
-        '''
-        try:
-            # Try multiple possible locations for the model file
-            possible_paths = [
-                'african_phytochemical_toxicity_models.pkl.gz',  # Same directory
-                'models/african_phytochemical_toxicity_models.pkl.gz',  # Models subdirectory
-                'african_phytochemical_toxicity_models.pkl',  # Uncompressed version
-            ]
-            
-            if model_path:
-                possible_paths.insert(0, model_path)
-            
-            for path in possible_paths:
-                if os.path.exists(path):
-                    if path.endswith('.gz'):
-                        with gzip.open(path, 'rb') as f:
-                            self.models = pickle.load(f)
-                        # Add debug info about loaded models
-                        st.write(f"✅ Loaded model data type: {type(self.models)}")
-                        if isinstance(self.models, dict):
-                            st.write(f"🔑 Available keys: {list(self.models.keys())}")
-                            st.write(f"📊 Number of models: {len(self.models)}")
-                        elif hasattr(loaded_data, 'predict_single_compound'):
-                            st.write("✅ Found predict_single_compound method")
-                            self.predictor = loaded_data  # Store the actual predictor
-                            self.is_loaded = True
-                            return True
-                        else:
-                            st.warning(f"🤔 Unexpected data structure: {type(loaded_data)}")
-                            return False
-
-                    else:
-                        with open(path, 'rb') as f:
-                            self.models = pickle.load(f)
-                    
-                    self.is_loaded = True
-                    return True 
-            
-            st.warning("Model file not found. Running in demo mode.")
-            return False
-            
-        except Exception as e:
-            st.warning(f"Error loading models: {str(e)}. Running in demo mode.")
-            return False '''
-    
     def calculate_molecular_descriptors(self, smiles):
         """Calculate molecular descriptors from SMILES"""
         if not RDKIT_AVAILABLE:
