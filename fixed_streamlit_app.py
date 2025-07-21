@@ -4,6 +4,9 @@ African Phytochemical Toxicity Prediction App
 A Streamlit application for researchers to analyze compound toxicity
 """
 
+from collections import Counter
+import requests
+import zipfile
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -54,7 +57,7 @@ ENDPOINT_NAMES = {
     'SR-p53': 'p53 Tumor Suppressor'
 }
 
-
+'''
 @st.cache_data
 def load_models_dict():
     """Load individual toxicity prediction models"""
@@ -85,9 +88,58 @@ def load_models_dict():
             
     except Exception as e:
         st.error(f"Error loading models: {str(e)}")
+        return None'''
+
+@st.cache_data
+def load_models_dict():
+    """Load individual toxicity prediction models"""
+    models = {}
+    
+    # First, try to load the main model file
+    main_model_path = 'african_phytochemical_toxicity_models.pkl'
+    if os.path.exists(main_model_path):
+        try:
+            import joblib
+            model_data = joblib.load(main_model_path)
+            models = model_data.get('models', {})
+            if models:
+                st.success(f"Successfully loaded {len(models)} models from main file")
+                return models
+        except Exception as e:
+            st.warning(f"Could not load main model file: {str(e)}")
+    
+    # Fallback: try individual model files
+    model_dir = 'models'
+    if not os.path.exists(model_dir):
+        st.warning(f"Models directory '{model_dir}' not found.")
         return None
-
-
+    
+    try:
+        for endpoint in TOX21_ENDPOINTS:
+            model_path = os.path.join(model_dir, f"{endpoint}_model.pkl")
+            if os.path.exists(model_path):
+                try:
+                    import joblib
+                    models[endpoint] = joblib.load(model_path)
+                    st.write(f"✅ Loaded {endpoint} model")
+                except:
+                    # Try with pickle if joblib fails
+                    with open(model_path, 'rb') as f:
+                        models[endpoint] = pickle.load(f)
+                    st.write(f"✅ Loaded {endpoint} model (pickle)")
+            else:
+                st.warning(f"⚠️ Model file not found: {model_path}")
+        
+        if models:
+            st.success(f"Successfully loaded {len(models)} models")
+            return models
+        else:
+            st.warning("No models could be loaded.")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error loading models: {str(e)}")
+        return None
     
 
 
