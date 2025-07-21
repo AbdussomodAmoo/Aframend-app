@@ -141,7 +141,7 @@ class MockToxicityPredictor:
         status_text.text('Demo analysis complete!')
         return results
 
-class StreamlitToxicityPredictor(MockToxicityPredictor):
+class StreamlitToxicityPredictor():
     """Streamlit wrapper for the toxicity predictor"""
     
     def __init__(self):
@@ -159,41 +159,7 @@ class StreamlitToxicityPredictor(MockToxicityPredictor):
         else:
             self.is_loaded = False
             return False
-    '''
-    def load_models_for_streamlit(self, model_path= 'african_phytochemical_toxicity_models.pkl.gz'):
-        """Load pre-trained models with Streamlit error handling"""
-        st.write(f"🔍 Looking for model file: {model_path}")
-        st.write(f"📁 File exists: {os.path.exists(model_path)}")
-        st.write(f"📂 Current directory: {os.getcwd()}")
-        st.write(f"📋 Files in models/: {os.listdir('models/') if os.path.exists('models/') else 'models/ directory not found'}")
- 
-        with gzip.open(model_path, 'rb') as f:
-            try:
-                loaded_data = pickle.load(f)
-                st.write(f"✅ Successfully unpickled data")
-                st.write(f"🔍 Data type: {type(loaded_data)}")
-                
-                # Check what we actually got
-                if hasattr(loaded_data, '__dict__'):
-                    st.write(f"📋 Object attributes: {list(loaded_data.__dict__.keys())}")
-                elif isinstance(loaded_data, dict):
-                    st.write(f"🔑 Dictionary keys: {list(loaded_data.keys())}")
-                
-                self.models = loaded_data  # or however you want to store it
-                self.is_loaded = True
-                return True
-                
-            except Exception as pickle_error:
-                st.error(f"💥 Error during unpickling: {str(pickle_error)}")
-                st.write(f"🔧 Error type: {type(pickle_error).__name__}")
-                
-                # Try to see if it's a compression issue
-                f.seek(0)  # Reset file pointer
-                raw_data = f.read()
-                st.write(f"📊 Raw file size: {len(raw_data)} bytes")
-                st.write(f"🔍 First 50 bytes: {raw_data[:50]}")
-                
-                return False'''
+   
         
     def calculate_molecular_descriptors(self, smiles):
         """Calculate molecular descriptors from SMILES"""
