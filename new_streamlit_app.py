@@ -728,4 +728,16 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("*Built for African phytochemical research*")
 
-
+if __name__ == "__main__":
+    # Initialize the model loader
+    loader = ModelLoader("models")  # Change path if needed
+    
+    # Load all models
+    models = loader.load_all_models()
+    
+    # List loaded models
+    loader.list_loaded_models()
+    
+    # Get list of available models
+    available_models = loader.get_available_models()
+    print(f"\nAvailable models: {available_models}")
