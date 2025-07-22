@@ -3,11 +3,14 @@
 African Phytochemical Toxicity Prediction App
 A Streamlit application for researchers to analyze compound toxicity
 """
-
+try:
+    import streamlit as st
+except ImportError as e:
+    print(f"Streamlit import failed: {e}")
+    raise
 from collections import Counter
 import requests
 import zipfile
-import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
