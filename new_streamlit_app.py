@@ -728,5 +728,4 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("*Built for African phytochemical research*")
 
-if __name__ == "__main__":
-    main()
+
