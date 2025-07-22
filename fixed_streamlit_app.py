@@ -70,13 +70,13 @@ def load_models_dict():
         models = loader.load_all_models()
         
         if models:
-            st.success(f"Successfully loaded {len(models)} models")
+            # st.success(f"Successfully loaded {len(models)} models")
             # Show which models were loaded
-            for model_name in models.keys():
-                st.write(f"✅ Loaded {model_name} model")
+            #for model_name in models.keys():
+            #st.write(f"✅ Loaded {model_name} model")
             return models
         else:
-            st.warning("No models could be loaded.")
+            #st.warning("No models could be loaded.")
             return None
             
     except Exception as e:
