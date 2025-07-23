@@ -34,7 +34,7 @@ import gzip
 
 # Import the corrected model loader
 try:
-    from model_loader_script import ToxicityModelLoader
+    from ToxModelLoader import ToxicityModelLoader
     MODEL_LOADER_AVAILABLE = True
 except ImportError:
     st.error("Model loader not available. Please ensure model_loader_script.py is in your directory.")
