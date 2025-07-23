@@ -54,33 +54,33 @@ class ToxicityModelLoader:
             return None
         
         def load_all_models(self):
-        """
-        Load all toxicity model .pkl files from the models directory.
-        
-        Returns:
-            dict: Dictionary with model names as keys and loaded models as values
-        """
-        # Try multiple possible locations for model files
-        possible_patterns = [
-            str(self.models_dir / "*.pkl"),  # Original: models/*.pkl
-            "*.pkl",                         # Current directory: *.pkl
-            str(Path("models") / "*.pkl"),   # Explicit models path
-            "models/*.pkl"                   # Simple models path
-        ]
-        
-        model_files = []
-        for pattern in possible_patterns:
-            found_files = glob.glob(pattern)
-            if found_files:
-                model_files = found_files
-                st.info(f"📁 Found models using pattern: {pattern}")
-                break
-        
-        if not model_files:
-            st.error(f"❌ No .pkl files found in any of these locations:")
+            """
+            Load all toxicity model .pkl files from the models directory.
+            
+            Returns:
+                dict: Dictionary with model names as keys and loaded models as values
+            """
+            # Try multiple possible locations for model files
+            possible_patterns = [
+                str(self.models_dir / "*.pkl"),  # Original: models/*.pkl
+                "*.pkl",                         # Current directory: *.pkl
+                str(Path("models") / "*.pkl"),   # Explicit models path
+                "models/*.pkl"                   # Simple models path
+            ]
+            
+            model_files = []
             for pattern in possible_patterns:
-                st.text(f"  • {pattern}")
-            return {}
+                found_files = glob.glob(pattern)
+                if found_files:
+                    model_files = found_files
+                    st.info(f"📁 Found models using pattern: {pattern}")
+                    break
+            
+            if not model_files:
+                st.error(f"❌ No .pkl files found in any of these locations:")
+                for pattern in possible_patterns:
+                    st.text(f"  • {pattern}")
+                return {}
         
         # Filter out metadata.pkl if it's included
         model_files = [f for f in model_files if not f.endswith('metadata.pkl')]
