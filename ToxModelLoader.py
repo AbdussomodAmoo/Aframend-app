@@ -130,7 +130,7 @@ class ToxicityModelLoader:
         
         return self.loaded_models.copy()
         
-     def load_specific_model(self, model_name):
+    def load_specific_model(self, model_name):
         # Remove .pkl extension if provided
         if model_name.endswith('.pkl'):
             model_name = model_name[:-4]
