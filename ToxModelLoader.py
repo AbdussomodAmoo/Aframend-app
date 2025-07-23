@@ -15,6 +15,10 @@ class ToxicityModelLoader:
         self.models_dir = Path(models_dir)
         self.loaded_models = {}
         self.metadata = None
+        # Debug: Show what we're looking for
+        st.info(f"🔍 Initialized ToxicityModelLoader")
+        st.info(f"📁 Expected models directory: {self.models_dir}")
+        st.info(f"📁 Current working directory: {Path.cwd()}")
         
         # Expected endpoint names from your metadata
         self.expected_endpoints = [
@@ -48,24 +52,39 @@ class ToxicityModelLoader:
             error_msg = f"❌ Failed to load metadata: {str(e)}"
             st.error(error_msg)
             return None
-    
-    def load_all_models(self):
+        
+        def load_all_models(self):
         """
         Load all toxicity model .pkl files from the models directory.
         
         Returns:
             dict: Dictionary with model names as keys and loaded models as values
         """
-        if not self.models_dir.exists():
-            st.error(f"❌ Models directory '{self.models_dir}' does not exist!")
-            return {}
+        # Try multiple possible locations for model files
+        possible_patterns = [
+            str(self.models_dir / "*.pkl"),  # Original: models/*.pkl
+            "*.pkl",                         # Current directory: *.pkl
+            str(Path("models") / "*.pkl"),   # Explicit models path
+            "models/*.pkl"                   # Simple models path
+        ]
         
-        # Find all .pkl files in the models directory
-        model_files = glob.glob(str(self.models_dir / "*.pkl"))
+        model_files = []
+        for pattern in possible_patterns:
+            found_files = glob.glob(pattern)
+            if found_files:
+                model_files = found_files
+                st.info(f"📁 Found models using pattern: {pattern}")
+                break
         
         if not model_files:
-            st.warning(f"⚠️ No .pkl files found in '{self.models_dir}'")
+            st.error(f"❌ No .pkl files found in any of these locations:")
+            for pattern in possible_patterns:
+                st.text(f"  • {pattern}")
             return {}
+        
+        # Filter out metadata.pkl if it's included
+        model_files = [f for f in model_files if not f.endswith('metadata.pkl')]
+
         
         st.info(f"🔍 Found {len(model_files)} model files")
 
@@ -110,27 +129,30 @@ class ToxicityModelLoader:
                 st.text(f"  • {model_name}: {error}")
         
         return self.loaded_models.copy()
-    
-    def load_specific_model(self, model_name):
-        """
-        Load a specific model by name.
         
-        Args:
-            model_name (str): Name of the model file (with or without .pkl extension)
-            
-        Returns:
-            object: Loaded model or None if failed
-        """
+     def load_specific_model(self, model_name):
         # Remove .pkl extension if provided
         if model_name.endswith('.pkl'):
             model_name = model_name[:-4]
         
-        model_path = self.models_dir / f"{model_name}.pkl"
+        # Try multiple possible locations, similar to metadata loading
+        possible_paths = [
+            self.models_dir / f"{model_name}.pkl",  # Original: models/model_name.pkl
+            Path(f"{model_name}.pkl"),              # Current directory: model_name.pkl
+            Path("models") / f"{model_name}.pkl",   # Explicit: models/model_name.pkl
+        ]
         
-        if not model_path.exists():
-            st.error(f"❌ Model file '{model_path}' does not exist!")
+        model_path = None
+        for path in possible_paths:
+            if path.exists():
+                model_path = path
+                break
+        
+        if model_path is None:
+            st.error(f"❌ Model file '{model_name}.pkl' not found in any location!")
             return None
         
+        # Actually load the model
         try:
             with open(model_path, 'rb') as f:
                 model = pickle.load(f)
