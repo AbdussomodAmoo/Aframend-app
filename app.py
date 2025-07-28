@@ -213,7 +213,16 @@ def get_qualcomm_api_key():
             api_key = st.secrets["qualcomm"]["api_key"]
         except:
             pass
-     return api_key           
+    
+    # Option 3: User input (for development/testing)
+    if not api_key:
+        api_key = st.sidebar.text_input(
+            "Enter Qualcomm AI API Key:",
+            type="password",
+            help="Your API key will not be stored"
+        )
+    
+    return api_key         
 
 
 class QualcommAIClient:
