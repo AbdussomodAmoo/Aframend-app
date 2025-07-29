@@ -15,6 +15,7 @@ import streamlit as st
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
+os.environ['QUALCOMM_AI_API_KEY'] = 'nfkt0qzh4geefrgwcwx628g9lu8dqrxhotfwthgj'
 # Constants
 TOX21_ENDPOINTS = [
     'NR-AR', 'NR-AR-LBD', 'NR-AhR', 'NR-Aromatase', 'NR-ER', 'NR-ER-LBD',
