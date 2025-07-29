@@ -730,6 +730,17 @@ def main():
         - Benzene: `C1=CC=CC=C1`
         - Aspirin: `CC(=O)OC1=CC=CC=C1C(=O)O`
         """)
+        
+# Debugging for LLM
+st.write("**Debug Info:**")
+st.write("- Secrets available:", "Yes" if hasattr(st, 'secrets') else "No")
+if hasattr(st, 'secrets'):
+    st.write("- Secrets keys:", list(st.secrets.keys()))
+    if "qualcomm" in st.secrets:
+        st.write("- Qualcomm section found: ✅")
+    else:
+        st.write("- Qualcomm section found: ❌")
+
 
 if __name__ == "__main__":
     main()
