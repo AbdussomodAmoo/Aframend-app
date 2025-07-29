@@ -709,8 +709,8 @@ def main():
                 risk_counts = valid_results['Risk_Level'].value_counts()
                 st.bar_chart(risk_counts)
                 st.caption("Risk Level Distribution")
-            if len(valid_results) > 0:
-                add_llm_analysis_to_ui(results_df)
+        if len(valid_results) > 0:
+            add_llm_analysis_to_ui(results_df)
     # Information sidebar
     with st.sidebar:
         st.header("ℹ️ Information")
