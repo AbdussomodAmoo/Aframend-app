@@ -16,6 +16,9 @@ from datetime import datetime
 from groq import Groq
 warnings.filterwarnings('ignore')
 
+
+os.environ['GROQ_API_KEY'] = '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'
+
 # Constants
 TOX21_ENDPOINTS = [
     'NR-AR', 'NR-AR-LBD', 'NR-AhR', 'NR-Aromatase', 'NR-ER', 'NR-ER-LBD',
@@ -715,16 +718,7 @@ def main():
         - Benzene: `C1=CC=CC=C1`
         - Aspirin: `CC(=O)OC1=CC=CC=C1C(=O)O`
         """)
-        
-# Debugging for LLM
-st.write("**Debug Info:**")
-st.write("- Secrets available:", "Yes" if hasattr(st, 'secrets') else "No")
-if hasattr(st, 'secrets'):
-    st.write("- Secrets keys:", list(st.secrets.keys()))
-    if "Groq" in st.secrets:
-        st.write("- Groq section found: ✅")
-    else:
-        st.write("- Groq section found: ❌")
+    
 
 
 if __name__ == "__main__":
