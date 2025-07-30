@@ -13,9 +13,9 @@ import requests
 from typing import Dict, List, Optional
 import streamlit as st
 from datetime import datetime
+from groq import Groq
 warnings.filterwarnings('ignore')
 
-os.environ['QUALCOMM_AI_API_KEY'] = 'nfkt0qzh4geefrgwcwx628g9lu8dqrxhotfwthgj'
 # Constants
 TOX21_ENDPOINTS = [
     'NR-AR', 'NR-AR-LBD', 'NR-AhR', 'NR-Aromatase', 'NR-ER', 'NR-ER-LBD',
@@ -201,68 +201,52 @@ def predict_toxicity(smiles_list: List[str], model) -> pd.DataFrame:
             })
     
     return pd.DataFrame(results)
-
-# SECURE API KEY MANAGEMENT
-def get_qualcomm_api_key():
-    """Securely retrieve Qualcomm AI API key"""
-    # Option 1: Environment variable (recommended for production)
-    api_key = os.getenv('QUALCOMM_AI_API_KEY')
+def get_groq_api_key():  # Rename from get_qualcomm_api_key
+    """Securely retrieve Groq API key"""
+    # Option 1: Environment variable
+    api_key = os.getenv('GROQ_API_KEY')
     
-    # Option 2: Streamlit secrets (recommended for Streamlit deployment)
-    if not api_key and hasattr(st, 'secrets'):
+    # Option 2: Streamlit secrets
+    if not api_key:
         try:
-            api_key = st.secrets["qualcomm"]["api_key"]
-        except:
+            api_key = st.secrets["groq"]["api_key"]  
+            st.success("✅ API key loaded from secrets!")
+        except Exception as e:
+            st.warning(f"Could not load from secrets: {e}")
             pass
     
-    # Option 3: User input (for development/testing)
+    # Option 3: User input
     if not api_key:
         api_key = st.sidebar.text_input(
-            "Enter Qualcomm AI API Key:",
+            "Enter Groq API Key:",  # Update label
             type="password",
             help="Your API key will not be stored"
         )
     
-    return api_key         
-
-
-class QualcommAIClient:
-    def __init__(self, api_key: str, base_url: str = None):
-        self.api_key = api_key
-        # Update this URL based on Qualcomm's actual endpoint
-        self.base_url = base_url or "https://api.qualcomm-ai.com/v1"  # Placeholder
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
+    return api_key
+#The Groq Class
+class GroqClient:
+    def __init__(self, api_key: str):
+        self.client = Groq(api_key=api_key)
     
-    def generate_response(self, system_prompt: str, user_prompt: str, model: str = "qualcomm-llm") -> str:
-        """Generate conversational response using Qualcomm AI"""
+    def generate_response(self, system_prompt: str, user_prompt: str, model: str = "llama3-8b-8192") -> str:
+        """Generate conversational response using Groq"""
         try:
-            payload = {
-                "model": model,
-                "messages": [
+            chat_completion = self.client.chat.completions.create(
+                messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                "max_tokens": 1500,
-                "temperature": 0.7
-            }
-            
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json=payload,
-                timeout=30
+                model=model,  # Available: llama3-8b-8192, llama3-70b-4096, mixtral-8x7b-32768
+                max_tokens=1500,
+                temperature=0.7
             )
-            
-            if response.status_code == 200:
-                return response.json()["choices"][0]["message"]["content"]
-            else:
-                return f"API Error: {response.status_code} - {response.text}"
-                
+            return chat_completion.choices[0].message.content
         except Exception as e:
-            return f"Error generating response: {str(e)}"
+            return f"Error generating response: {str(e)}"     
+
+
+
 
 
 # SYSTEM PROMPTS AND TEMPLATES
@@ -443,28 +427,28 @@ def format_comparative_data(compounds_list: List[Dict]) -> Dict:
     return {"comparison_data": "\n".join(comparison_data)}
 
 # MAIN LLM INTEGRATION FUNCTIONS
-def generate_single_compound_analysis(row: Dict, client: QualcommAIClient) -> str:
+def generate_single_compound_analysis(row: Dict, client: GroqClient) -> str:
     """Generate conversational analysis for a single compound"""
     data = format_single_compound_data(row)
     prompt = PROMPT_TEMPLATES["single_compound"].format(**data)
     
     return client.generate_response(TOXICOLOGY_EXPERT_SYSTEM_PROMPT, prompt)
 
-def generate_multiple_compounds_analysis(results_df, client: QualcommAIClient) -> str:
+def generate_multiple_compounds_analysis(results_df, client: GroqClient) -> str:
     """Generate conversational analysis for multiple compounds"""
     data = format_multiple_compounds_data(results_df)
     prompt = PROMPT_TEMPLATES["multiple_compounds"].format(**data)
     
     return client.generate_response(TOXICOLOGY_EXPERT_SYSTEM_PROMPT, prompt)
 
-def generate_risk_assessment(results_df, client: QualcommAIClient) -> str:
+def generate_risk_assessment(results_df, client: GroqClient) -> str:
     """Generate risk assessment summary"""
     data = format_risk_assessment_data(results_df)
     prompt = PROMPT_TEMPLATES["risk_assessment"].format(**data)
     
     return client.generate_response(TOXICOLOGY_EXPERT_SYSTEM_PROMPT, prompt)
 
-def generate_comparative_analysis(compounds_list: List[Dict], client: QualcommAIClient) -> str:
+def generate_comparative_analysis(compounds_list: List[Dict], client: GroqClient) -> str:
     """Generate comparative analysis between compounds"""
     data = format_comparative_data(compounds_list)
     prompt = PROMPT_TEMPLATES["comparative_analysis"].format(**data)
@@ -476,14 +460,14 @@ def add_llm_analysis_to_ui(results_df):
     """Add LLM analysis section to your Streamlit UI"""
     
     # Get API key
-    api_key = get_qualcomm_api_key()
+    api_key = get_groq_api_key()
     
     if not api_key:
-        st.warning("Please provide your Qualcomm AI API key to generate conversational analysis.")
+        st.warning("Please provide your Groq AI API key to generate conversational analysis.")
         return
     
     # Initialize client
-    client = QualcommAIClient(api_key)
+    client = GroqClient(api_key)
     
     st.header("🤖 AI Toxicologist Analysis")
     
