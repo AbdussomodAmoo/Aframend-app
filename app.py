@@ -209,7 +209,7 @@ def get_groq_api_key():  # Rename from get_qualcomm_api_key
     # Option 2: Streamlit secrets
     if not api_key:
         try:
-            api_key = st.secrets["groq"]["api_key"]  
+            api_key = st.secrets["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"]   #["groq"]["api_key"]  
             st.success("✅ API key loaded from secrets!")
         except Exception as e:
             st.warning(f"Could not load from secrets: {e}")
