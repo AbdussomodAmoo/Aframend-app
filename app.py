@@ -201,7 +201,7 @@ def predict_toxicity(smiles_list: List[str], model) -> pd.DataFrame:
             })
     
     return pd.DataFrame(results)
-def get_groq_api_key():  # Rename from get_qualcomm_api_key
+def get_groq_api_key(): 
     """Securely retrieve Groq API key"""
     # Option 1: Environment variable
     api_key = os.getenv('GROQ_API_KEY')
@@ -721,10 +721,10 @@ st.write("**Debug Info:**")
 st.write("- Secrets available:", "Yes" if hasattr(st, 'secrets') else "No")
 if hasattr(st, 'secrets'):
     st.write("- Secrets keys:", list(st.secrets.keys()))
-    if "qualcomm" in st.secrets:
-        st.write("- Qualcomm section found: ✅")
+    if "Groq" in st.secrets:
+        st.write("- Groq section found: ✅")
     else:
-        st.write("- Qualcomm section found: ❌")
+        st.write("- Groq section found: ❌")
 
 
 if __name__ == "__main__":
