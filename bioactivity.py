@@ -14,7 +14,7 @@ from groq import Groq
 warnings.filterwarnings('ignore')
 
 # Set your Groq API key here (replace with your actual key)
-os.environ['GROQ_API_KEY'] = 'your_groq_api_key_here'
+os.environ['GROQ_API_KEY'] = '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'
 
 def featurize(smiles):
     """
