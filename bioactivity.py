@@ -14,7 +14,7 @@ from groq import Groq
 warnings.filterwarnings('ignore')
 
 # Set your Groq API key here (replace with your actual key)
-os.environ['GROQ_API_KEY'] = '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'
+os.environ['GROQ_API_KEY'] = 'your_groq_api_key_here'
 
 def featurize(smiles):
     """
@@ -295,6 +295,23 @@ def add_ai_analysis_section(results_df):
     try:
         client = GroqClient(api_key)
         
+        # Analysis type selection
+        analysis_options = ["Compound Overview", "Single Compound Deep Dive"]
+        analysis_type = st.selectbox("Choose analysis type:", analysis_options)
+        
+        if analysis_type == "Single Compound Deep Dive":
+            valid_results = results_df[results_df['Valid'] == True]
+            if len(valid_results) == 0:
+                st.error("No valid compounds to analyze")
+                return
+            
+            # Let user select a compound
+            selected_idx = st.selectbox(
+                "Select compound for detailed analysis:",
+                range(len(valid_results)),
+                format_func=lambda x: f"{valid_results.iloc[x]['SMILES'][:30]}... (IC50: {valid_results.iloc[x]['Predicted_IC50_Scaled']:.3f})"
+            )
+        
         if st.button("🧬 Generate AI Analysis", type="primary"):
             with st.spinner("Generating expert IC50 analysis..."):
                 valid_results = results_df[results_df['Valid'] == True]
@@ -303,8 +320,12 @@ def add_ai_analysis_section(results_df):
                     st.error("No valid compounds to analyze")
                     return
                 
-                analysis_type = "single" if len(valid_results) == 1 else "multiple"
-                analysis = generate_ic50_analysis(results_df, client, analysis_type)
+                if analysis_type == "Single Compound Deep Dive":
+                    # Create single compound dataframe
+                    single_compound_df = valid_results.iloc[[selected_idx]].copy()
+                    analysis = generate_ic50_analysis(single_compound_df, client, "single")
+                else:
+                    analysis = generate_ic50_analysis(results_df, client, "multiple")
             
             # Display analysis
             st.subheader("🧬 Expert Analysis")
@@ -323,6 +344,7 @@ def add_ai_analysis_section(results_df):
     
     except Exception as e:
         st.error(f"Error initializing AI analysis: {str(e)}")
+        st.error("Please check your Groq API key and try again.")
 
 def load_model_and_scaler_from_github(model_url: str, scaler_url: str = None):
     """Load model and scaler from GitHub repository"""
@@ -559,8 +581,8 @@ def main():
             with col2:
                 # IC50 distribution
                 ic50_data = valid_results['Predicted_IC50_Scaled'].values
-                hist_data = pd.DataFrame({'Scaled IC50': ic50_data})
-                st.histogram_chart(hist_data['Scaled IC50'])
+                fig_data = pd.DataFrame({'Scaled IC50': ic50_data})
+                st.bar_chart(fig_data['Scaled IC50'])
                 st.caption("IC50 Value Distribution")
             
             # Top compounds table
@@ -569,7 +591,8 @@ def main():
             st.dataframe(top_compounds[['SMILES', 'Predicted_IC50_Scaled', 'Activity_Level', 'Molecular_Properties']])
 
         # Add AI Analysis section
-        add_ai_analysis_section(results_df)
+        if len(valid_results) > 0:
+            add_ai_analysis_section(results_df)
     
     # Information sidebar
     with st.sidebar:
