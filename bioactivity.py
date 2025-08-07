@@ -190,20 +190,34 @@ IC50_PROMPT_TEMPLATES = {
     "single_compound": """
 ANALYSIS REQUEST: Single Compound IC50 Prediction Analysis
 
+
 COMPOUND DATA:
 - SMILES: {smiles}
 - Predicted IC50 (scaled): {ic50_scaled}
 - Activity Level: {activity_level}
 - Key Properties: {properties}
 
+MOLECULAR DESCRIPTORS:
+- Molecular Weight: {mol_weight}
+- LogP (Lipophilicity): {logp}
+- TPSA: {tpsa}
+- H-bond Donors: {hbd}
+- H-bond Acceptors: {hba}
+- Rotatable Bonds: {rotatable_bonds}
+- Aromatic Rings: {aromatic_rings}
+- Heavy Atom Count: {heavy_atoms}
+- Fraction CSP3: {fraction_csp3}
+- Bertz Complexity: {bertz_ct}
+
 Please provide:
 1. IC50 prediction interpretation and biological significance
-2. Activity level assessment for drug development
-3. Molecular property analysis (MW, LogP, TPSA impact)
-4. Structure-activity insights and optimization suggestions
-5. Limitations of this computational prediction
+2. **Physicochemical Analysis**: How do the molecular descriptors (MW, LogP, TPSA, etc.) explain the predicted activity level?
+3. **Drug-likeness Assessment**: Evaluate Lipinski's Rule of Five and other drug-likeness criteria
+4. **SAR Insights**: Which molecular features are likely driving the bioactivity?
+5. **Optimization Strategy**: Based on the descriptors, what modifications could improve activity?
+6. **Target Binding Rationale**: How do these properties relate to binding to the protein targets?
 
-Keep scientifically accurate but accessible for medicinal chemists.
+Keep scientifically accurate but Focus on connecting molecular features to bioactivity prediction.
 """,
 
     "multiple_compounds": """
@@ -236,7 +250,17 @@ def format_single_ic50_data(row: Dict) -> Dict:
         "smiles": row.get('SMILES', 'Unknown'),
         "ic50_scaled": row.get('Predicted_IC50_Scaled', 0),
         "activity_level": row.get('Activity_Level', 'Unknown'),
-        "properties": row.get('Molecular_Properties', 'N/A')
+        "properties": row.get('Molecular_Properties', 'N/A'),
+        "mol_weight": features_dict.get('MolWt', 'N/A'),
+        "logp": features_dict.get('LogP', 'N/A'),
+        "tpsa": features_dict.get('TPSA', 'N/A'),
+        "hbd": features_dict.get('NumHDonors', 'N/A'),
+        "hba": features_dict.get('NumHAcceptors', 'N/A'),
+        "rotatable_bonds": features_dict.get('NumRotatableBonds', 'N/A'),
+        "aromatic_rings": features_dict.get('NumAromaticRings', 'N/A'),
+        "heavy_atoms": features_dict.get('HeavyAtomCount', 'N/A'),
+        "fraction_csp3": features_dict.get('FractionCSP3', 'N/A'),
+        "bertz_ct": features_dict.get('BertzCT', 'N/A')
     }
 
 def format_multiple_ic50_data(results_df) -> Dict:
@@ -260,8 +284,12 @@ def format_multiple_ic50_data(results_df) -> Dict:
     top_compounds = valid_results.nsmallest(5, 'Predicted_IC50_Scaled')
     compounds_data = []
     for idx, row in top_compounds.iterrows():
+        features = featurize(row['SMILES'])
         compounds_data.append(
-            f"- {row['SMILES']}: IC50 {row['Predicted_IC50_Scaled']:.3f} ({row['Activity_Level']})"
+            f"- {row['SMILES']}: IC50 {row['Predicted_IC50_Scaled']:.3f} ({row['Activity_Level']})\n"
+            f"  MW: {features.get('MolWt', 'N/A'):.1f}, LogP: {features.get('LogP', 'N/A'):.2f}, "
+            f"TPSA: {features.get('TPSA', 'N/A'):.1f}, HBD: {features.get('NumHDonors', 'N/A')}, "
+            f"HBA: {features.get('NumHAcceptors', 'N/A')}"
         )
     
     summary["top_compounds_data"] = "\n".join(compounds_data)
