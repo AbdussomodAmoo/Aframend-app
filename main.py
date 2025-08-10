@@ -3,23 +3,21 @@ import pandas as pd
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import Descriptors, Fragments
+from rdkit.Chem import rdMolDescriptors
 from rdkit.Chem.rdMolDescriptors import GetMorganFingerprintAsBitVect, GetMACCSKeysFingerprint
 from typing import List, Dict, Optional, Union
 import joblib
 import warnings
 import os
-import json
 import requests
-from typing import Dict, List, Optional
-import streamlit as st
 from datetime import datetime
 from groq import Groq
 warnings.filterwarnings('ignore')
 
-
+# Set your Groq API key here (replace with your actual key)
 os.environ['GROQ_API_KEY'] = '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'
 
-# Constants
+# ===== TOXICITY PREDICTION CONSTANTS =====
 TOX21_ENDPOINTS = [
     'NR-AR', 'NR-AR-LBD', 'NR-AhR', 'NR-Aromatase', 'NR-ER', 'NR-ER-LBD',
     'NR-PPAR-gamma', 'SR-ARE', 'SR-ATAD5', 'SR-HSE', 'SR-MMP', 'SR-p53'
@@ -40,6 +38,191 @@ ENDPOINT_NAMES = {
     'SR-p53': 'p53 Tumor Suppressor'
 }
 
+# ===== COMMON GROQ CLIENT =====
+def get_groq_api_key(): 
+    """Securely retrieve Groq API key"""
+    api_key = os.getenv('GROQ_API_KEY')
+    
+    if not api_key or api_key == 'your_groq_api_key_here':
+        api_key = st.sidebar.text_input(
+            "Enter Groq API Key (optional for AI analysis):",
+            type="password",
+            help="Your API key will not be stored. Leave blank to skip AI analysis."
+        )
+    
+    return api_key
+
+class GroqClient:
+    def __init__(self, api_key: str):
+        self.client = Groq(api_key=api_key)
+    
+    def generate_response(self, system_prompt: str, user_prompt: str, model: str = "llama3-8b-8192") -> str:
+        """Generate conversational response using Groq"""
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                model=model,
+                max_tokens=1500,
+                temperature=0.7
+            )
+            return chat_completion.choices[0].message.content
+        except Exception as e:
+            return f"Error generating response: {str(e)}"
+
+# ===== BIOACTIVITY PREDICTION FUNCTIONS =====
+def featurize(smiles):
+    """
+    Extract molecular features exactly as used in training.
+    This matches the featurize function from your training code.
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    
+    try:
+        return {
+            'MolWt': Descriptors.MolWt(mol),
+            'TPSA': Descriptors.TPSA(mol),
+            'NumHDonors': Descriptors.NumHDonors(mol),
+            'NumHAcceptors': Descriptors.NumHAcceptors(mol),
+            'NumRotatableBonds': Descriptors.NumRotatableBonds(mol),
+            'LogP': Descriptors.MolLogP(mol),
+            'NumRings': rdMolDescriptors.CalcNumRings(mol),
+            'HeavyAtomCount': Descriptors.HeavyAtomCount(mol),
+            'FractionCSP3': rdMolDescriptors.CalcFractionCSP3(mol),
+            'NumAromaticRings': Descriptors.NumAromaticRings(mol),
+            'NumAliphaticRings': Descriptors.NumAliphaticRings(mol),
+            'NumValenceElectrons': Descriptors.NumValenceElectrons(mol),
+            'BertzCT': Descriptors.BertzCT(mol),
+            'NumHeteroatoms': Descriptors.NumHeteroatoms(mol)
+        }
+    except Exception as e:
+        return None
+
+def predict_ic50(smiles_list: List[str], model, scaler_X) -> pd.DataFrame:
+    """
+    Make IC50 predictions for a list of SMILES using the trained regression model.
+    """
+    results = []
+    
+    for smiles in smiles_list:
+        # Validate SMILES
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            results.append({
+                'SMILES': smiles,
+                'Valid': False,
+                'Predicted_IC50_Scaled': None,
+                'Activity_Level': 'Invalid SMILES',
+                'Molecular_Properties': 'N/A'
+            })
+            continue
+        
+        # Extract features
+        features_dict = featurize(smiles)
+        if features_dict is None:
+            results.append({
+                'SMILES': smiles,
+                'Valid': False,
+                'Predicted_IC50_Scaled': None,
+                'Activity_Level': 'Feature extraction failed',
+                'Molecular_Properties': 'N/A'
+            })
+            continue
+        
+        try:
+            # Convert features to array in the same order as training
+            feature_names = ['MolWt', 'TPSA', 'NumHDonors', 'NumHAcceptors', 'NumRotatableBonds',
+                           'LogP', 'NumRings', 'HeavyAtomCount', 'FractionCSP3', 'NumAromaticRings',
+                           'NumAliphaticRings', 'NumValenceElectrons', 'BertzCT', 'NumHeteroatoms']
+            
+            features_array = np.array([features_dict[name] for name in feature_names]).reshape(1, -1)
+            
+            # Scale features using the same scaler from training
+            features_scaled = scaler_X.transform(features_array)
+            
+            # Make prediction
+            ic50_scaled = model.predict(features_scaled)[0]
+            
+            # Determine activity level based on scaled IC50 prediction
+            if ic50_scaled < -0.5:
+                activity_level = "Highly Active"
+            elif ic50_scaled < 0:
+                activity_level = "Active"
+            elif ic50_scaled < 0.5:
+                activity_level = "Moderately Active"
+            else:
+                activity_level = "Low Activity"
+            
+            # Format molecular properties for display
+            mol_props = f"MW: {features_dict['MolWt']:.1f}, LogP: {features_dict['LogP']:.2f}, TPSA: {features_dict['TPSA']:.1f}"
+            
+            results.append({
+                'SMILES': smiles,
+                'Valid': True,
+                'Predicted_IC50_Scaled': round(float(ic50_scaled), 3),
+                'Activity_Level': activity_level,
+                'Molecular_Properties': mol_props
+            })
+            
+        except Exception as e:
+            results.append({
+                'SMILES': smiles,
+                'Valid': False,
+                'Predicted_IC50_Scaled': None,
+                'Activity_Level': f'Prediction failed: {str(e)}',
+                'Molecular_Properties': 'N/A'
+            })
+    
+    return pd.DataFrame(results)
+
+def load_bioactivity_model_and_scaler_from_github(model_url: str, scaler_url: str = None):
+    """Load bioactivity model and scaler from GitHub repository"""
+    try:
+        # Load model
+        if 'raw.githubusercontent.com' in model_url:
+            response = requests.get(model_url)
+            if response.status_code == 200:
+                with open('temp_model.joblib', 'wb') as f:
+                    f.write(response.content)
+                model = joblib.load('temp_model.joblib')
+                os.remove('temp_model.joblib')
+            else:
+                raise Exception(f"Failed to download model: {response.status_code}")
+        else:
+            raise Exception("Please provide a direct raw GitHub URL to the model file")
+        
+        # Load scaler if URL provided
+        scaler = None
+        if scaler_url and 'raw.githubusercontent.com' in scaler_url:
+            response = requests.get(scaler_url)
+            if response.status_code == 200:
+                with open('temp_scaler.joblib', 'wb') as f:
+                    f.write(response.content)
+                scaler = joblib.load('temp_scaler.joblib')
+                os.remove('temp_scaler.joblib')
+        
+        return model, scaler
+    except Exception as e:
+        raise Exception(f"Error loading from GitHub: {str(e)}")
+
+def create_default_scaler():
+    """Create a default StandardScaler for when scaler is not available"""
+    from sklearn.preprocessing import StandardScaler
+    st.warning("⚠️ No scaler provided. Using identity transformation (no scaling).")
+    
+    class IdentityScaler:
+        def transform(self, X):
+            return X
+        def fit_transform(self, X):
+            return X
+    
+    return IdentityScaler()
+
+# ===== TOXICITY PREDICTION FUNCTIONS =====
 def extract_molecular_features(mol: Chem.Mol,
                              include_fingerprints: bool = True,
                              morgan_radius: int = 2,
@@ -144,8 +327,7 @@ def smiles_to_features(smiles: str) -> np.ndarray:
     # Convert to numpy array (values only, in consistent order)
     return np.array(list(features_dict.values()))
 
-# ===== MODIFIED: NEW MODEL LOADING FUNCTION =====
-def load_models():
+def load_toxicity_models():
     """Load all 12 endpoint models"""
     models = {}
     missing_models = []
@@ -163,11 +345,10 @@ def load_models():
         st.warning(f"⚠️ Missing models: {', '.join(missing_models)}")
     
     if models:
-        st.success(f"✅ Successfully loaded {len(models)} models!")
+        st.success(f"✅ Successfully loaded {len(models)} toxicity models!")
     
     return models
 
-# ===== MODIFIED: NEW MULTI-ENDPOINT PREDICTION FUNCTION =====
 def predict_toxicity_multi_endpoint(smiles_list: List[str], models: Dict, selected_endpoints: List[str]) -> pd.DataFrame:
     """Make toxicity predictions for multiple endpoints"""
     results = []
@@ -245,7 +426,6 @@ def predict_toxicity_multi_endpoint(smiles_list: List[str], models: Dict, select
     
     return pd.DataFrame(results)
 
-# ===== NEW: ENDPOINT SELECTION FUNCTION =====
 def add_endpoint_selection(available_models):
     """Add endpoint selection interface"""
     st.header("🎯 Select Toxicity Endpoints")
@@ -285,7 +465,6 @@ def add_endpoint_selection(available_models):
     
     return selected_endpoints
 
-# ===== NEW: MULTI-ENDPOINT RESULTS DISPLAY =====
 def display_multi_endpoint_results(results_df: pd.DataFrame, selected_endpoints: List[str]):
     """Display results for multiple endpoints"""
     
@@ -389,7 +568,6 @@ def display_multi_endpoint_results(results_df: pd.DataFrame, selected_endpoints:
         st.dataframe(endpoint_df, use_container_width=True)
         st.caption(f"**{ENDPOINT_NAMES[selected_endpoint_view]}**")
 
-# ===== NEW: COMPREHENSIVE SUMMARY FUNCTION =====
 def create_comprehensive_summary(results_df: pd.DataFrame, selected_endpoints: List[str]):
     """Create a comprehensive toxicity summary across all endpoints"""
     
@@ -470,52 +648,7 @@ def create_comprehensive_summary(results_df: pd.DataFrame, selected_endpoints: L
                 mime="text/csv"
             )
 
-# ===== KEEP ALL YOUR EXISTING LLM FUNCTIONS UNCHANGED =====
-def get_groq_api_key(): 
-    """Securely retrieve Groq API key"""
-    # Option 1: Environment variable
-    api_key = os.getenv('GROQ_API_KEY')
-    
-    # Option 2: Streamlit secrets
-    if not api_key:
-        try:
-            api_key = st.secrets["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"]   #["groq"]["api_key"]  
-            st.success("✅ API key loaded from secrets!")
-        except Exception as e:
-            st.warning(f"Could not load from secrets: {e}")
-            pass
-    
-    # Option 3: User input
-    if not api_key:
-        api_key = st.sidebar.text_input(
-            "Enter Groq API Key:",  # Update label
-            type="password",
-            help="Your API key will not be stored"
-        )
-    
-    return api_key
-
-class GroqClient:
-    def __init__(self, api_key: str):
-        self.client = Groq(api_key=api_key)
-    
-    def generate_response(self, system_prompt: str, user_prompt: str, model: str = "llama3-8b-8192") -> str:
-        """Generate conversational response using Groq"""
-        try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                model=model,  # Available: llama3-8b-8192, llama3-70b-4096, mixtral-8x7b-32768
-                max_tokens=1500,
-                temperature=0.7
-            )
-            return chat_completion.choices[0].message.content
-        except Exception as e:
-            return f"Error generating response: {str(e)}"     
-
-# ===== KEEP ALL YOUR EXISTING LLM SYSTEM PROMPTS AND TEMPLATES =====
+# ===== AI ANALYSIS SYSTEM PROMPTS =====
 TOXICOLOGY_EXPERT_SYSTEM_PROMPT = """
 You are Dr. Sarah Chen, a senior toxicologist with 15+ years of experience in computational toxicology and drug safety assessment. You specialize in explaining complex toxicological findings to both scientific and non-scientific audiences.
 
@@ -538,7 +671,36 @@ COMMUNICATION STYLE:
 - Always include appropriate disclaimers about limitations
 """
 
-# ===== KEEP ALL YOUR EXISTING PROMPT TEMPLATES BUT ADD THIS NEW ONE =====
+IC50_EXPERT_SYSTEM_PROMPT = """
+You are Dr. Alex Chen, a computational medicinal chemist with 15+ years of experience in drug discovery and IC50 prediction. You specialize in explaining IC50 predictions and their implications for drug development.
+
+YOUR ROLE:
+- Interpret IC50 predictions and their biological significance
+- Explain structure-activity relationships
+- Provide insights for lead optimization
+- Maintain scientific accuracy while being accessible
+
+KNOWLEDGE CONTEXT:
+- IC50 values represent the concentration needed to inhibit 50% of biological activity
+- Lower IC50 = higher potency (more active compound)
+- Your model predicts scaled IC50 values from multiple targets:
+  * Dihydrofolate reductase
+  * Phosphodiesterase 5A  
+  * Voltage-gated T-type calcium channel alpha-1H subunit
+  * Tyrosine-protein kinase ABL
+  * Epidermal growth factor receptor erbB1
+  * Maltase-glucoamylase
+- Activity levels: Highly Active (scaled IC50 < -0.5), Active (-0.5 to 0), Moderately Active (0 to 0.5), Low Activity (>0.5)
+- Molecular descriptors used: MW, TPSA, H-bond donors/acceptors, rotatable bonds, LogP, rings, etc.
+
+COMMUNICATION STYLE:
+- Professional yet accessible
+- Use drug discovery terminology appropriately
+- Provide actionable medicinal chemistry insights
+- Acknowledge computational prediction limitations
+"""
+
+# ===== AI ANALYSIS PROMPT TEMPLATES =====
 PROMPT_TEMPLATES = {
     "multi_endpoint_analysis": """
 ANALYSIS REQUEST: Multi-Endpoint Toxicity Assessment
@@ -564,7 +726,7 @@ Please provide:
 Focus on multi-endpoint toxicity implications and integrated risk assessment.
 """,
 
-    "single_compound": """
+    "single_compound_toxicity": """
 ANALYSIS REQUEST: Single Compound Toxicity Assessment
 
 COMPOUND DATA:
@@ -584,7 +746,39 @@ Please provide a comprehensive but accessible explanation covering:
 Keep the explanation conversational but scientifically accurate.
 """,
 
-    "multiple_compounds": """
+    "single_compound_ic50": """
+ANALYSIS REQUEST: Single Compound IC50 Prediction Analysis
+
+COMPOUND DATA:
+- SMILES: {smiles}
+- Predicted IC50 (scaled): {ic50_scaled}
+- Activity Level: {activity_level}
+- Key Properties: {properties}
+
+MOLECULAR DESCRIPTORS:
+- Molecular Weight: {mol_weight}
+- LogP (Lipophilicity): {logp}
+- TPSA: {tpsa}
+- H-bond Donors: {hbd}
+- H-bond Acceptors: {hba}
+- Rotatable Bonds: {rotatable_bonds}
+- Aromatic Rings: {aromatic_rings}
+- Heavy Atom Count: {heavy_atoms}
+- Fraction CSP3: {fraction_csp3}
+- Bertz Complexity: {bertz_ct}
+
+Please provide:
+1. IC50 prediction interpretation and biological significance
+2. **Physicochemical Analysis**: How do the molecular descriptors (MW, LogP, TPSA, etc.) explain the predicted activity level?
+3. **Drug-likeness Assessment**: Evaluate Lipinski's Rule of Five and other drug-likeness criteria
+4. **SAR Insights**: Which molecular features are likely driving the bioactivity?
+5. **Optimization Strategy**: Based on the descriptors, what modifications could improve activity?
+6. **Target Binding Rationale**: How do these properties relate to binding to the protein targets?
+
+Keep scientifically accurate but Focus on connecting molecular features to bioactivity prediction.
+""",
+
+    "multiple_compounds_toxicity": """
 ANALYSIS REQUEST: Multiple Compounds Toxicity Assessment
 
 DATASET SUMMARY:
@@ -606,177 +800,421 @@ Please provide:
 Focus on actionable insights and risk prioritization.
 """,
 
-    "risk_assessment": """
-ANALYSIS REQUEST: Risk Assessment Summary
+    "multiple_compounds_ic50": """
+ANALYSIS REQUEST: Compound Library IC50 Screening Analysis
 
-RISK DISTRIBUTION:
-{risk_distribution}
+DATASET SUMMARY:
+- Total Compounds: {total_compounds}
+- Valid Predictions: {valid_predictions}
+- Highly Active: {highly_active_count}
+- Active: {active_count}
+- Average Scaled IC50: {avg_ic50:.3f}
 
-HIGH-RISK COMPOUNDS:
-{high_risk_compounds}
-
-Please provide:
-1. Risk assessment overview
-2. Immediate concerns and priorities
-3. Risk management recommendations
-4. Monitoring suggestions
-5. Next steps for further evaluation
-
-Emphasize practical risk management strategies.
-""",
-
-    "comparative_analysis": """
-ANALYSIS REQUEST: Comparative Compound Analysis
-
-COMPOUNDS FOR COMPARISON:
-{comparison_data}
+TOP COMPOUNDS:
+{top_compounds_data}
 
 Please provide:
-1. Side-by-side comparison of toxicity profiles
-2. Relative risk ranking
-3. Structural or chemical factors influencing toxicity
-4. Recommendations for compound selection/prioritization
-5. Suggested alternatives if high-risk compounds are identified
+1. Overall library screening assessment
+2. Hit identification and prioritization
+3. Structure-activity patterns observed
+4. Lead optimization recommendations
+5. Next steps for medicinal chemistry teams
 
-Focus on helping with decision-making between options.
+Focus on actionable insights for drug discovery.
 """
 }
 
-# ===== KEEP ALL YOUR EXISTING LLM FORMATTING FUNCTIONS =====
-def format_single_compound_data(row: Dict) -> Dict:
-    """Format single compound data for LLM input"""
+# ===== AI ANALYSIS HELPER FUNCTIONS =====
+def format_single_ic50_data(row: Dict, features_dict: Dict) -> Dict:
+    """Format single IC50 compound data for LLM input"""
     return {
         "smiles": row.get('SMILES', 'Unknown'),
-        "compound_name": row.get('Compound_Name', 'Unknown compound'),
-        "probability": round(row.get('Toxic_Probability', 0) * 100, 1),
-        "prediction": row.get('Prediction', 'Unknown'),
-        "risk_level": row.get('Risk_Level', 'Unknown')
+        "ic50_scaled": row.get('Predicted_IC50_Scaled', 0),
+        "activity_level": row.get('Activity_Level', 'Unknown'),
+        "properties": row.get('Molecular_Properties', 'N/A'),
+        "mol_weight": features_dict.get('MolWt', 'N/A'),
+        "logp": features_dict.get('LogP', 'N/A'),
+        "tpsa": features_dict.get('TPSA', 'N/A'),
+        "hbd": features_dict.get('NumHDonors', 'N/A'),
+        "hba": features_dict.get('NumHAcceptors', 'N/A'),
+        "rotatable_bonds": features_dict.get('NumRotatableBonds', 'N/A'),
+        "aromatic_rings": features_dict.get('NumAromaticRings', 'N/A'),
+        "heavy_atoms": features_dict.get('HeavyAtomCount', 'N/A'),
+        "fraction_csp3": features_dict.get('FractionCSP3', 'N/A'),
+        "bertz_ct": features_dict.get('BertzCT', 'N/A')
     }
 
-# ===== MODIFIED: UPDATE LLM FORMATTING FOR MULTI-ENDPOINT =====
-def format_multiple_compounds_data(results_df) -> Dict:
-    """Format multiple compounds data for LLM input - updated for multi-endpoint"""
+def format_multiple_ic50_data(results_df) -> Dict:
+    """Format multiple IC50 compounds data for LLM input"""
     valid_results = results_df[results_df['Valid'] == True]
     
-    # Count toxic predictions across all endpoints
-    total_toxic = 0
-    total_high_risk = 0
-    
-    # Count endpoint-specific results
-    for col in results_df.columns:
-        if col.endswith('_Prediction'):
-            total_toxic += len(valid_results[valid_results[col] == 'Toxic'])
-        elif col.endswith('_Risk_Level'):
-            total_high_risk += len(valid_results[valid_results[col] == 'High'])
-    
     # Summary statistics
+    highly_active = len(valid_results[valid_results['Activity_Level'] == 'Highly Active'])
+    active = len(valid_results[valid_results['Activity_Level'] == 'Active'])
+    avg_ic50 = valid_results['Predicted_IC50_Scaled'].mean()
+    
     summary = {
         "total_compounds": len(results_df),
         "valid_predictions": len(valid_results),
-        "toxic_count": total_toxic,
-        "high_risk_count": total_high_risk
+        "highly_active_count": highly_active,
+        "active_count": active,
+        "avg_ic50": avg_ic50
     }
     
-    # Detailed compound data (limit to top 10 for brevity)
+    # Top compounds (most active - lowest IC50)
+    top_compounds = valid_results.nsmallest(5, 'Predicted_IC50_Scaled')
     compounds_data = []
-    for idx, row in valid_results.head(10).iterrows():
-        # Find the first probability column for basic info
-        prob_cols = [col for col in row.index if col.endswith('_Probability') and pd.notna(row[col])]
-        if prob_cols:
-            first_prob = row[prob_cols[0]]
-            compounds_data.append(
-                f"Compound {idx}: {row['SMILES']} - "
-                f"Multi-endpoint analysis ({first_prob:.1%} example probability)"
-            )
+    for idx, row in top_compounds.iterrows():
+        features = featurize(row['SMILES'])
+        compounds_data.append(
+            f"- {row['SMILES']}: IC50 {row['Predicted_IC50_Scaled']:.3f} ({row['Activity_Level']})\n"
+            f"  MW: {features.get('MolWt', 'N/A'):.1f}, LogP: {features.get('LogP', 'N/A'):.2f}, "
+            f"TPSA: {features.get('TPSA', 'N/A'):.1f}, HBD: {features.get('NumHDonors', 'N/A')}, "
+            f"HBA: {features.get('NumHAcceptors', 'N/A')}"
+        )
     
-    summary["compounds_data"] = "\n".join(compounds_data)
-    if len(valid_results) > 10:
-        summary["compounds_data"] += f"\n... and {len(valid_results) - 10} more compounds"
+    summary["top_compounds_data"] = "\n".join(compounds_data)
     
     return summary
 
-# ===== KEEP ALL OTHER EXISTING LLM FUNCTIONS UNCHANGED =====
-def format_risk_assessment_data(results_df) -> Dict:
-    """Format risk assessment data for LLM input"""
-    valid_results = results_df[results_df['Valid'] == True]
-    
-    # Risk distribution across all endpoints
-    all_risks = []
-    for col in results_df.columns:
-        if col.endswith('_Risk_Level'):
-            all_risks.extend(valid_results[col].dropna().tolist())
-    
-    if all_risks:
-        risk_counts = pd.Series(all_risks).value_counts()
-        risk_distribution = "\n".join([f"- {level}: {count} predictions" 
-                                     for level, count in risk_counts.items()])
+def generate_ic50_analysis(results_df, client: GroqClient, analysis_type: str = "multiple") -> str:
+    """Generate AI analysis for IC50 predictions"""
+    if analysis_type == "single" and len(results_df) == 1:
+        row = results_df.iloc[0].to_dict()
+        features_dict = featurize(row['SMILES'])
+        data = format_single_ic50_data(row, features_dict)
+        prompt = PROMPT_TEMPLATES["single_compound_ic50"].format(**data)
     else:
-        risk_distribution = "No valid risk assessments available"
+        data = format_multiple_ic50_data(results_df)
+        prompt = PROMPT_TEMPLATES["multiple_compounds_ic50"].format(**data)
     
-    # High-risk compounds
-    high_risk_compounds = []
-    for idx, row in valid_results.iterrows():
-        high_risk_endpoints = []
-        for col in row.index:
-            if col.endswith('_Risk_Level') and row[col] == 'High':
-                endpoint = col.replace('_Risk_Level', '')
-                high_risk_endpoints.append(endpoint)
+    return client.generate_response(IC50_EXPERT_SYSTEM_PROMPT, prompt)
+
+# ===== COMMON INPUT FUNCTIONS =====
+def get_smiles_input(key_prefix=""):
+    """Common function to get SMILES input - used by both pages"""
+    input_method = st.radio(
+        "Choose input method:",
+        ["Single SMILES", "Multiple SMILES (text area)", "Upload CSV file"],
+        key=f"{key_prefix}_input_method"
+    )
+    
+    smiles_list = []
+    
+    if input_method == "Single SMILES":
+        smiles_input = st.text_input(
+            "Enter SMILES string:",
+            placeholder="e.g., CC(=O)OC1=CC=CC=C1C(=O)O (aspirin)",
+            help="Enter a valid SMILES notation",
+            key=f"{key_prefix}_single_smiles"
+        )
+        if smiles_input:
+            smiles_list = [smiles_input.strip()]
+    
+    elif input_method == "Multiple SMILES (text area)":
+        smiles_text = st.text_area(
+            "Enter SMILES (one per line):",
+            placeholder="CC(=O)OC1=CC=CC=C1C(=O)O\nCN1C=NC2=C1C(=O)N(C(=O)N2C)C\nCC(C)CC1=CC=C(C=C1)C(C)C(=O)O",
+            height=200,
+            help="Enter multiple SMILES, one per line",
+            key=f"{key_prefix}_multi_smiles"
+        )
+        if smiles_text:
+            smiles_list = [s.strip() for s in smiles_text.split('\n') if s.strip()]
+    
+    else:  # CSV upload
+        uploaded_file = st.file_uploader(
+            "Upload CSV file with SMILES column:",
+            type=['csv'],
+            help="CSV file should contain a column named 'canonical_smiles', 'SMILES', or 'smiles'",
+            key=f"{key_prefix}_csv_upload"
+        )
+        if uploaded_file:
+            try:
+                df = pd.read_csv(uploaded_file)
+                st.write("**Preview of uploaded data:**")
+                st.dataframe(df.head())
+                
+                # Find SMILES column
+                smiles_col = None
+                for col in df.columns:
+                    if col.lower() in ['canonical_smiles', 'smiles', 'smile']:
+                        smiles_col = col
+                        break
+                
+                if smiles_col:
+                    smiles_list = df[smiles_col].dropna().tolist()
+                    st.success(f"Found {len(smiles_list)} SMILES in column '{smiles_col}'")
+                else:
+                    st.error("No SMILES column found. Please ensure your CSV has a column named 'canonical_smiles' or 'SMILES'.")
+            
+            except Exception as e:
+                st.error(f"Error reading CSV file: {str(e)}")
+    
+    return smiles_list
+
+# ===== BIOACTIVITY PREDICTION PAGE =====
+def bioactivity_page():
+    st.title("🧬 IC50 Bioactivity Predictor")
+    st.markdown("**Predict IC50 values for chemical compounds using Random Forest regression**")
+    st.markdown("*Trained on multiple protein targets: DHFR, PDE5A, T-type calcium channel, ABL kinase, EGFR, Maltase-glucoamylase*")
+    
+    # Model loading section
+    st.header("📊 Model Loading")
+    
+    model_source = st.radio(
+        "Choose model source:",
+        ["Load from local file", "Load from GitHub URL"],
+        key="bioactivity_model_source"
+    )
+    
+    model = None
+    scaler_X = None
+    
+    if model_source == "Load from local file":
+        # Try to load local model
+        try:
+            model = joblib.load('bioactivity_model.joblib')
+            st.success("✅ Model loaded successfully from local file!")
+            
+            # Try to load scaler
+            try:
+                from sklearn.preprocessing import StandardScaler
+                # If you saved the scaler during training, load it here
+                # For now, we'll create a warning about missing scaler
+                scaler_X = create_default_scaler()
+            except:
+                scaler_X = create_default_scaler()
+                
+        except FileNotFoundError:
+            st.error("❌ Model file 'bioactivity_model.joblib' not found in current directory.")
+            st.info("💡 Please upload your model file or provide a GitHub URL.")
+        except Exception as e:
+            st.error(f"❌ Error loading local model: {str(e)}")
+    
+    else:  # GitHub URL
+        model_url = st.text_input(
+            "Enter GitHub raw URL to your model file:",
+            placeholder="https://raw.githubusercontent.com/username/repo/main/bioactivity_model.joblib",
+            help="Make sure to use the 'raw' GitHub URL",
+            key="bioactivity_model_url"
+        )
         
-        if high_risk_endpoints:
-            high_risk_compounds.append(
-                f"- {row['SMILES']}: High risk in {', '.join(high_risk_endpoints[:3])}"
+        scaler_url = st.text_input(
+            "Enter GitHub raw URL to your scaler file (optional):",
+            placeholder="https://raw.githubusercontent.com/username/repo/main/scaler_X.joblib",
+            help="If you saved the StandardScaler during training",
+            key="bioactivity_scaler_url"
+        )
+        
+        if model_url:
+            try:
+                with st.spinner("Loading model from GitHub..."):
+                    model, scaler_from_github = load_bioactivity_model_and_scaler_from_github(model_url, scaler_url)
+                    scaler_X = scaler_from_github if scaler_from_github else create_default_scaler()
+                st.success("✅ Model loaded successfully from GitHub!")
+            except Exception as e:
+                st.error(f"❌ {str(e)}")
+    
+    if model is None:
+        st.warning("Please load a model to continue with predictions.")
+        st.stop()
+    
+    # Input methods
+    st.header("📝 Input SMILES")
+    smiles_list = get_smiles_input("bioactivity")
+    
+    # Make predictions
+    if smiles_list:
+        st.header("🔮 IC50 Predictions")
+        
+        with st.spinner("Making IC50 predictions..."):
+            results_df = predict_ic50(smiles_list, model, scaler_X)
+        
+        # Display results
+        st.subheader("📊 Results Summary")
+        
+        valid_results = results_df[results_df['Valid'] == True]
+        if len(valid_results) > 0:
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Compounds", len(results_df))
+            with col2:
+                st.metric("Valid Predictions", len(valid_results))
+            with col3:
+                highly_active = len(valid_results[valid_results['Activity_Level'] == 'Highly Active'])
+                st.metric("Highly Active", highly_active)
+            with col4:
+                avg_ic50 = valid_results['Predicted_IC50_Scaled'].mean()
+                st.metric("Avg IC50 (scaled)", f"{avg_ic50:.3f}")
+
+        # Detailed results table
+        st.subheader("📋 Detailed Results")
+        
+        # Color code the results based on activity level
+        def color_activity(val):
+            if val == 'Highly Active':
+                return 'background-color: #00ff00'
+            elif val == 'Active':
+                return 'background-color: #90ee90'
+            elif val == 'Moderately Active':
+                return 'background-color: #ffff99'
+            elif val == 'Low Activity':
+                return 'background-color: #ffcccb'
+            else:
+                return ''
+        
+        styled_df = results_df.style.applymap(color_activity, subset=['Activity_Level'])
+        st.dataframe(styled_df, use_container_width=True)
+        
+        # Download results
+        csv = results_df.to_csv(index=False)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        st.download_button(
+            label="📥 Download Results as CSV",
+            data=csv,
+            file_name=f"ic50_predictions_{timestamp}.csv",
+            mime="text/csv"
+        )
+        
+        # Visualization
+        if len(valid_results) > 0:
+            st.subheader("📈 Results Visualization")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Activity level distribution
+                activity_counts = valid_results['Activity_Level'].value_counts()
+                st.bar_chart(activity_counts)
+                st.caption("Activity Level Distribution")
+            
+            with col2:
+                # IC50 distribution
+                ic50_data = valid_results['Predicted_IC50_Scaled'].values
+                fig_data = pd.DataFrame({'Scaled IC50': ic50_data})
+                st.bar_chart(fig_data['Scaled IC50'])
+                st.caption("IC50 Value Distribution")
+            
+            # Top compounds table
+            st.subheader("🏆 Most Active Compounds (Lowest IC50)")
+            top_compounds = valid_results.nsmallest(10, 'Predicted_IC50_Scaled')
+            st.dataframe(top_compounds[['SMILES', 'Predicted_IC50_Scaled', 'Activity_Level', 'Molecular_Properties']])
+
+        # Add AI Analysis section
+        if len(valid_results) > 0:
+            add_bioactivity_ai_analysis_section(results_df)
+
+def add_bioactivity_ai_analysis_section(results_df):
+    """Add AI analysis section for bioactivity predictions"""
+    st.header("🤖 AI IC50 Analysis")
+    
+    # Get API key
+    api_key = get_groq_api_key()
+    
+    if not api_key:
+        st.info("💡 Add your Groq API key in the sidebar to enable AI-powered analysis and insights!")
+        return
+    
+    # Initialize client
+    try:
+        client = GroqClient(api_key)
+        
+        # Analysis type selection
+        analysis_options = ["Compound Overview", "Single Compound Deep Dive"]
+        analysis_type = st.selectbox("Choose analysis type:", analysis_options, key="bioactivity_analysis_type")
+        
+        if analysis_type == "Single Compound Deep Dive":
+            valid_results = results_df[results_df['Valid'] == True]
+            if len(valid_results) == 0:
+                st.error("No valid compounds to analyze")
+                return
+            
+            # Let user select a compound
+            selected_idx = st.selectbox(
+                "Select compound for detailed analysis:",
+                range(len(valid_results)),
+                format_func=lambda x: f"{valid_results.iloc[x]['SMILES'][:30]}... (IC50: {valid_results.iloc[x]['Predicted_IC50_Scaled']:.3f})",
+                key="bioactivity_compound_select"
+            )
+        
+        if st.button("🧬 Generate AI Analysis", type="primary", key="bioactivity_generate_analysis"):
+            with st.spinner("Generating expert IC50 analysis..."):
+                valid_results = results_df[results_df['Valid'] == True]
+                
+                if len(valid_results) == 0:
+                    st.error("No valid compounds to analyze")
+                    return
+                
+                if analysis_type == "Single Compound Deep Dive":
+                    # Create single compound dataframe
+                    single_compound_df = valid_results.iloc[[selected_idx]].copy()
+                    analysis = generate_ic50_analysis(single_compound_df, client, "single")
+                else:
+                    analysis = generate_ic50_analysis(results_df, client, "multiple")
+            
+            # Display analysis
+            st.subheader("🧬 Expert Analysis")
+            st.markdown(analysis)
+            
+            # Save analysis option
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            analysis_filename = f"ic50_analysis_{timestamp}.txt"
+            
+            st.download_button(
+                label="📄 Download Analysis Report",
+                data=analysis,
+                file_name=analysis_filename,
+                mime="text/plain",
+                key="bioactivity_download_analysis"
             )
     
-    return {
-        "risk_distribution": risk_distribution,
-        "high_risk_compounds": "\n".join(high_risk_compounds[:5])  # Top 5
-    }
+    except Exception as e:
+        st.error(f"Error initializing AI analysis: {str(e)}")
+        st.error("Please check your Groq API key and try again.")
 
-def format_comparative_data(compounds_list: List[Dict]) -> Dict:
-    """Format comparative analysis data for LLM input"""
-    comparison_data = []
-    for i, compound in enumerate(compounds_list):
-        comparison_data.append(
-            f"Compound {i+1}: {compound['SMILES']}\n"
-            f"  - Prediction: {compound.get('Prediction', 'N/A')}\n"
-            f"  - Probability: {compound.get('Toxic_Probability', 0):.1%}\n"
-            f"  - Risk Level: {compound.get('Risk_Level', 'N/A')}\n"
-        )
+# ===== TOXICITY PREDICTION PAGE =====
+def toxicity_page():
+    st.title("🧪 Multi-Endpoint Toxicity Predictor")
+    st.markdown("**Predict toxicity across multiple biological endpoints using TOX21 models**")
     
-    return {"comparison_data": "\n".join(comparison_data)}
-
-# ===== KEEP ALL EXISTING LLM GENERATION FUNCTIONS =====
-def generate_single_compound_analysis(row: Dict, client: GroqClient) -> str:
-    """Generate conversational analysis for a single compound"""
-    data = format_single_compound_data(row)
-    prompt = PROMPT_TEMPLATES["single_compound"].format(**data)
+    # Load all models
+    models = load_toxicity_models()
     
-    return client.generate_response(TOXICOLOGY_EXPERT_SYSTEM_PROMPT, prompt)
-
-def generate_multiple_compounds_analysis(results_df, client: GroqClient) -> str:
-    """Generate conversational analysis for multiple compounds"""
-    data = format_multiple_compounds_data(results_df)
-    prompt = PROMPT_TEMPLATES["multiple_compounds"].format(**data)
+    if not models:
+        st.error("❌ No models could be loaded. Please ensure model files (.pkl) are available.")
+        st.stop()
     
-    return client.generate_response(TOXICOLOGY_EXPERT_SYSTEM_PROMPT, prompt)
-
-def generate_risk_assessment(results_df, client: GroqClient) -> str:
-    """Generate risk assessment summary"""
-    data = format_risk_assessment_data(results_df)
-    prompt = PROMPT_TEMPLATES["risk_assessment"].format(**data)
+    # Input methods
+    st.header("📝 Input SMILES")
+    smiles_list = get_smiles_input("toxicity")
     
-    return client.generate_response(TOXICOLOGY_EXPERT_SYSTEM_PROMPT, prompt)
-
-def generate_comparative_analysis(compounds_list: List[Dict], client: GroqClient) -> str:
-    """Generate comparative analysis between compounds"""
-    data = format_comparative_data(compounds_list)
-    prompt = PROMPT_TEMPLATES["comparative_analysis"].format(**data)
+    # Add endpoint selection
+    selected_endpoints = add_endpoint_selection(models)
     
-    return client.generate_response(TOXICOLOGY_EXPERT_SYSTEM_PROMPT, prompt)
+    if not selected_endpoints:
+        st.warning("Please select at least one endpoint to proceed.")
+        return
+    
+    # Make predictions
+    if smiles_list and selected_endpoints:
+        st.header("🔮 Multi-Endpoint Predictions")
+        
+        with st.spinner("Making predictions across selected endpoints..."):
+            results_df = predict_toxicity_multi_endpoint(smiles_list, models, selected_endpoints)
+        
+        # Display multi-endpoint results
+        display_multi_endpoint_results(results_df, selected_endpoints)
+        
+        # Comprehensive summary
+        create_comprehensive_summary(results_df, selected_endpoints)
+        
+        # LLM analysis with multi-endpoint support
+        add_toxicity_llm_analysis_to_ui(results_df, selected_endpoints)
 
-# ===== MODIFIED: UPDATE LLM UI INTEGRATION FOR MULTI-ENDPOINT =====
-def add_llm_analysis_to_ui(results_df, selected_endpoints):
-    """Add LLM analysis section to your Streamlit UI - updated for multi-endpoint"""
+def add_toxicity_llm_analysis_to_ui(results_df, selected_endpoints):
+    """Add LLM analysis section to toxicity page"""
     
     # Get API key
     api_key = get_groq_api_key()
@@ -791,17 +1229,57 @@ def add_llm_analysis_to_ui(results_df, selected_endpoints):
     st.header("🤖 AI Toxicologist Analysis")
     
     # Analysis options
-    analysis_type = st.selectbox(
-        "Choose analysis type:",
-        ["Multi-Endpoint Overview", "Risk Assessment Summary", "Single Compound Deep Dive", "Compare Selected Compounds"]
-    )
+    analysis_options = ["Multi-Endpoint Overview", "Single Compound Deep Dive"]
+    analysis_type = st.selectbox("Choose analysis type:", analysis_options, key="toxicity_analysis_type")
     
-    if st.button("Generate AI Analysis", type="primary"):
-        with st.spinner("Generating expert analysis..."):
+    if analysis_type == "Single Compound Deep Dive":
+        valid_results = results_df[results_df['Valid'] == True]
+        if len(valid_results) == 0:
+            st.error("No valid compounds to analyze")
+            return
+        
+        # Let user select a compound
+        selected_idx = st.selectbox(
+            "Select compound for detailed analysis:",
+            range(len(valid_results)),
+            format_func=lambda x: f"{valid_results.iloc[x]['SMILES'][:30]}...",
+            key="toxicity_compound_select"
+        )
+    
+    if st.button("🧬 Generate AI Analysis", type="primary", key="toxicity_generate_analysis"):
+        with st.spinner("Generating expert toxicity analysis..."):
+            valid_results = results_df[results_df['Valid'] == True]
             
-            if analysis_type == "Multi-Endpoint Overview":
+            if len(valid_results) == 0:
+                st.error("No valid compounds to analyze")
+                return
+            
+            if analysis_type == "Single Compound Deep Dive":
+                # Find first available endpoint for analysis
+                selected_compound = valid_results.iloc[selected_idx].to_dict()
+                first_endpoint = None
+                for endpoint in selected_endpoints:
+                    if f'{endpoint}_Prediction' in selected_compound:
+                        first_endpoint = endpoint
+                        break
+                
+                if first_endpoint:
+                    # Reformat for single compound analysis
+                    single_data = {
+                        'smiles': selected_compound['SMILES'],
+                        'compound_name': 'Unknown compound',
+                        'probability': selected_compound.get(f'{first_endpoint}_Probability', 0) * 100,
+                        'prediction': selected_compound.get(f'{first_endpoint}_Prediction', 'Unknown'),
+                        'risk_level': selected_compound.get(f'{first_endpoint}_Risk_Level', 'Unknown')
+                    }
+                    prompt = PROMPT_TEMPLATES["single_compound_toxicity"].format(**single_data)
+                    analysis = client.generate_response(TOXICOLOGY_EXPERT_SYSTEM_PROMPT, prompt)
+                else:
+                    st.error("No valid endpoint data for selected compound")
+                    return
+                
+            else:  # Multi-Endpoint Overview
                 # Create multi-endpoint summary
-                valid_results = results_df[results_df['Valid'] == True]
                 endpoint_summaries = []
                 
                 for endpoint in selected_endpoints:
@@ -823,90 +1301,6 @@ def add_llm_analysis_to_ui(results_df, selected_endpoints):
                 
                 prompt = PROMPT_TEMPLATES["multi_endpoint_analysis"].format(**multi_data)
                 analysis = client.generate_response(TOXICOLOGY_EXPERT_SYSTEM_PROMPT, prompt)
-                
-            elif analysis_type == "Risk Assessment Summary":
-                analysis = generate_risk_assessment(results_df, client)
-                
-            elif analysis_type == "Single Compound Deep Dive":
-                # Let user select a compound
-                valid_results = results_df[results_df['Valid'] == True]
-                if len(valid_results) == 0:
-                    st.error("No valid compounds to analyze")
-                    return
-                
-                selected_idx = st.selectbox(
-                    "Select compound for detailed analysis:",
-                    range(len(valid_results)),
-                    format_func=lambda x: f"{valid_results.iloc[x]['SMILES'][:20]}..."
-                )
-                
-                selected_compound = valid_results.iloc[selected_idx].to_dict()
-                
-                # For multi-endpoint, we'll analyze the first available endpoint
-                first_endpoint = None
-                for endpoint in selected_endpoints:
-                    if f'{endpoint}_Prediction' in selected_compound:
-                        first_endpoint = endpoint
-                        break
-                
-                if first_endpoint:
-                    # Reformat for single compound analysis
-                    single_data = {
-                        'SMILES': selected_compound['SMILES'],
-                        'Compound_Name': 'Unknown compound',
-                        'Toxic_Probability': selected_compound.get(f'{first_endpoint}_Probability', 0),
-                        'Prediction': selected_compound.get(f'{first_endpoint}_Prediction', 'Unknown'),
-                        'Risk_Level': selected_compound.get(f'{first_endpoint}_Risk_Level', 'Unknown')
-                    }
-                    analysis = generate_single_compound_analysis(single_data, client)
-                else:
-                    st.error("No valid endpoint data for selected compound")
-                    return
-                
-            elif analysis_type == "Compare Selected Compounds":
-                # Let user select multiple compounds
-                valid_results = results_df[results_df['Valid'] == True]
-                if len(valid_results) < 2:
-                    st.error("Need at least 2 valid compounds for comparison")
-                    return
-                
-                selected_indices = st.multiselect(
-                    "Select compounds to compare (2-5):",
-                    range(len(valid_results)),
-                    format_func=lambda x: f"{valid_results.iloc[x]['SMILES'][:20]}...",
-                    max_selections=5
-                )
-                
-                if len(selected_indices) < 2:
-                    st.warning("Please select at least 2 compounds")
-                    return
-                
-                # Prepare comparison data
-                selected_compounds = []
-                for i in selected_indices:
-                    compound = valid_results.iloc[i].to_dict()
-                    
-                    # Find first available endpoint for comparison
-                    first_endpoint = None
-                    for endpoint in selected_endpoints:
-                        if f'{endpoint}_Prediction' in compound:
-                            first_endpoint = endpoint
-                            break
-                    
-                    if first_endpoint:
-                        comp_data = {
-                            'SMILES': compound['SMILES'],
-                            'Toxic_Probability': compound.get(f'{first_endpoint}_Probability', 0),
-                            'Prediction': compound.get(f'{first_endpoint}_Prediction', 'Unknown'),
-                            'Risk_Level': compound.get(f'{first_endpoint}_Risk_Level', 'Unknown')
-                        }
-                        selected_compounds.append(comp_data)
-                
-                if selected_compounds:
-                    analysis = generate_comparative_analysis(selected_compounds, client)
-                else:
-                    st.error("No valid data for comparison")
-                    return
         
         # Display analysis
         st.subheader("🧬 Expert Analysis")
@@ -920,127 +1314,63 @@ def add_llm_analysis_to_ui(results_df, selected_endpoints):
             label="📄 Download Analysis Report",
             data=analysis,
             file_name=analysis_filename,
-            mime="text/plain"
+            mime="text/plain",
+            key="toxicity_download_analysis"
         )
 
-# ===== COMPLETELY REWRITTEN: MAIN FUNCTION =====
+# ===== MAIN APP WITH PAGE NAVIGATION =====
 def main():
-    st.set_page_config(page_title="Multi-Endpoint Toxicity Predictor", page_icon="🧪", layout="wide")
-    
-    st.title("🧪 Multi-Endpoint Toxicity Predictor")
-    st.markdown("**Predict toxicity across multiple biological endpoints using TOX21 models**")
-    
-    # ===== MODIFIED: Load all models instead of single model =====
-    models = load_models()
-    
-    if not models:
-        st.error("❌ No models could be loaded. Please ensure model files (.pkl) are available.")
-        st.stop()
-    
-    # ===== KEEP EXISTING: Input methods section (UNCHANGED) =====
-    st.header("📝 Input SMILES")
-    
-    input_method = st.radio(
-        "Choose input method:",
-        ["Single SMILES", "Multiple SMILES (text area)", "Upload CSV file"]
+    st.set_page_config(
+        page_title="Chemical Analysis Platform", 
+        page_icon="⚗️", 
+        layout="wide"
     )
     
-    smiles_list = []
-    
-    if input_method == "Single SMILES":
-        smiles_input = st.text_input(
-            "Enter SMILES string:",
-            placeholder="e.g., CCO (ethanol)",
-            help="Enter a valid SMILES notation"
-        )
-        if smiles_input:
-            smiles_list = [smiles_input.strip()]
-    
-    elif input_method == "Multiple SMILES (text area)":
-        smiles_text = st.text_area(
-            "Enter SMILES (one per line):",
-            placeholder="CCO\nC1=CC=CC=C1\nCC(=O)O",
-            height=200,
-            help="Enter multiple SMILES, one per line"
-        )
-        if smiles_text:
-            smiles_list = [s.strip() for s in smiles_text.split('\n') if s.strip()]
-    
-    else:  # CSV upload
-        uploaded_file = st.file_uploader(
-            "Upload CSV file with SMILES column:",
-            type=['csv'],
-            help="CSV file should contain a column named 'SMILES' or 'smiles'"
-        )
-        if uploaded_file:
-            try:
-                df = pd.read_csv(uploaded_file)
-                st.write("**Preview of uploaded data:**")
-                st.dataframe(df.head())
-                
-                # Find SMILES column
-                smiles_col = None
-                for col in df.columns:
-                    if col.lower() in ['smiles', 'smile', 'canonical_smiles']:
-                        smiles_col = col
-                        break
-                
-                if smiles_col:
-                    smiles_list = df[smiles_col].dropna().tolist()
-                    st.success(f"Found {len(smiles_list)} SMILES in column '{smiles_col}'")
-                else:
-                    st.error("No SMILES column found. Please ensure your CSV has a column named 'SMILES'")
-            
-            except Exception as e:
-                st.error(f"Error reading CSV file: {str(e)}")
-    
-    # ===== NEW: Add endpoint selection =====
-    selected_endpoints = add_endpoint_selection(models)
-    
-    if not selected_endpoints:
-        st.warning("Please select at least one endpoint to proceed.")
-        return
-    
-    # ===== MODIFIED: Make predictions only if we have SMILES and endpoints =====
-    if smiles_list and selected_endpoints:
-        st.header("🔮 Multi-Endpoint Predictions")
-        
-        with st.spinner("Making predictions across selected endpoints..."):
-            results_df = predict_toxicity_multi_endpoint(smiles_list, models, selected_endpoints)
-        
-        # ===== NEW: Display multi-endpoint results =====
-        display_multi_endpoint_results(results_df, selected_endpoints)
-        
-        # ===== NEW: Comprehensive summary =====
-        create_comprehensive_summary(results_df, selected_endpoints)
-        
-        # ===== MODIFIED: LLM analysis with multi-endpoint support =====
-        add_llm_analysis_to_ui(results_df, selected_endpoints)
-    
-    # ===== MODIFIED: Information sidebar =====
+    # Sidebar for navigation
     with st.sidebar:
-        st.header("ℹ️ Information")
-        st.markdown(f"""
-        **Model Details:**
-        - Available Models: {len(models)}
-        - Endpoints: {', '.join(models.keys())}
-        - Algorithm: Random Forest Classifier
-        - Features: Molecular descriptors + fingerprints
+        st.title("⚗️ Chemical Analysis Platform")
         
-        **Risk Levels:**
-        - 🔴 **High**: Probability > 0.7
-        - 🟡 **Medium**: Probability 0.3-0.7
-        - 🟢 **Low**: Probability < 0.3
+        # Page selection
+        page = st.selectbox(
+            "Select Analysis Type:",
+            ["🧪 Toxicity Prediction", "🧬 Bioactivity Prediction (IC50)"],
+            index=0
+        )
         
-        **Endpoint Categories:**
-        - **NR-**: Nuclear Receptor pathways
-        - **SR-**: Stress Response pathways
+        st.markdown("---")
         
-        **SMILES Examples:**
-        - Ethanol: `CCO`
-        - Benzene: `C1=CC=CC=C1`
-        - Aspirin: `CC(=O)OC1=CC=CC=C1C(=O)O`
+        # Common sidebar information
+        st.header("ℹ️ Platform Information")
+        st.markdown("""
+        **Available Analyses:**
+        - **Toxicity**: Multi-endpoint TOX21 predictions
+        - **Bioactivity**: IC50 predictions for drug discovery
+        
+        **Input Formats:**
+        - Single SMILES string
+        - Multiple SMILES (text area)
+        - CSV file upload
+        
+        **AI Features:**
+        - Expert analysis with Groq API
+        - Conversational insights
+        - Downloadable reports
         """)
+        
+        st.header("🧪 Example SMILES")
+        st.markdown("""
+        - **Aspirin**: `CC(=O)OC1=CC=CC=C1C(=O)O`
+        - **Caffeine**: `CN1C=NC2=C1C(=O)N(C(=O)N2C)C`
+        - **Ethanol**: `CCO`
+        - **Benzene**: `C1=CC=CC=C1`
+        - **Ibuprofen**: `CC(C)CC1=CC=C(C=C1)C(C)C(=O)O`
+        """)
+    
+    # Main content based on page selection
+    if page == "🧪 Toxicity Prediction":
+        toxicity_page()
+    elif page == "🧬 Bioactivity Prediction (IC50)":
+        bioactivity_page()
 
 if __name__ == "__main__":
     main()
