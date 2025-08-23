@@ -15,7 +15,7 @@ from groq import Groq
 warnings.filterwarnings('ignore')
 
 # Set your Groq API key here (replace with your actual key)
-os.environ['GROQ_API_KEY'] = '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'
+os.environ['GROQ_API_KEY'] = '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'
 
 # ===== TOXICITY PREDICTION CONSTANTS =====
 TOX21_ENDPOINTS = [
